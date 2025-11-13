@@ -1,0 +1,21 @@
+# ---- Base Image ----
+FROM python:3.11-slim AS base
+
+# ---- Environment Settings ----
+# Don't cache pip installs; prevent .pyc files; ensure clean stdout
+ENV PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# ---- System Packages ----
+# install gcc and build-essential for any packages that need compilation (like numpy)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---- Working Directory ----
+WORKDIR /app
+
+# ---- Install Base Python Dependencies ----
+COPY requirements/base.txt /tmp/base.txt
+RUN pip install --no-cache-dir -r /tmp/base.txt
