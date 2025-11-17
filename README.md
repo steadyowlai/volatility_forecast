@@ -5,11 +5,26 @@ ML-powered system to forecast 5-day realized volatility (RV_5d) for SPY with exp
 ## Quick Start
 
 ```bash
+# Using Makefile (recommended)
+make build        # Build all Docker images
+make run-ingest   # Run ingest service (downloads 10 years of market data)
+make verify-data  # Verify downloaded data
+
+# Or use one command
+make ingest       # Build and run ingest service
+
+# View all available commands
+make help
+```
+
+### Alternative (Docker commands)
+
+```bash
 # 1. Build images
 docker build -t vf-base -f Dockerfile.base .
 docker build -t vf-ingest -f services/ingest/Dockerfile .
 
-# 2. Run ingest service (downloads 10 years of market data)
+# 2. Run ingest service
 docker-compose up ingest
 ```
 
