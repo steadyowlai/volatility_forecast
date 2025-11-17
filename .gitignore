@@ -4,4 +4,4 @@ __pycache__/
 data/
 artifacts/
 .venv/
-docs/
+local/

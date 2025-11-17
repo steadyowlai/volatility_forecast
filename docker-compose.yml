@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # Ingest Service - Downloads market data from Yahoo Finance
+  ingest:
+    image: vf-ingest
+    container_name: vf-ingest
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    command: ["python", "services/ingest/app.py"]
+
+  # Future services will be added here:
+  # features:
+  #   image: vf-features
+  #   depends_on:
+  #     - ingest
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./data:/app/data
+  
+  # train:
+  #   image: vf-train
+  #   depends_on:
+  #     - features
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./artifacts:/app/artifacts
+  
+  # infer:
+  #   image: vf-infer
+  #   depends_on:
+  #     - train
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./artifacts:/app/artifacts
+  
+  # api:
+  #   image: vf-api
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     - infer
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./artifacts:/app/artifacts
+  
+  # dashboard:
+  #   image: vf-dashboard
+  #   ports:
+  #     - "8501:8501"
+  #   depends_on:
+  #     - infer
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./data:/app/data
+
+networks:
+  default:
+    name: vf-network

@@ -12,12 +12,15 @@ RUN pip install --no-cache-dir -r /tmp/ingest.txt
 # ---- Working directory ----
 WORKDIR /app
 
-# ---- Copy project code (relative to build context =) repo root ----
+# ---- Copy project code (relative to build context = repo root) ----
 COPY libs/ ./libs/
 COPY services/ingest/ ./services/ingest/
 COPY config/ ./config/
 
+# ---- Set PYTHONPATH so Python can find the libs module ----
+ENV PYTHONPATH=/app
+
 # ---- Default command ----
-# “When someone runs a container from this image, execute this command by default.”
+# "When someone runs a container from this image, execute this command by default."
 # So if you run: docker run vf-ingest, it will automatically run this command: python services/ingest/app.py
 CMD ["python", "services/ingest/app.py"]
