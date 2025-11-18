@@ -31,10 +31,10 @@ def download_one(symbol: str, period: str = LOOKBACK_PERIOD) -> pd.DataFrame:
         period: Lookback period (default: 10y). Valid periods: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
     
     TODO (Level 2): Implement incremental updates
-        - Check last date in existing data
-        - Only download new data since last date
-        - Add --force-refresh flag to re-download everything
-        - This will improve efficiency for daily production runs
+        *Check last date in existing data
+        *Only download new data since last date
+        *add --force-refresh flag to redownload everything
+        *improves efficiency for daily production runs
     """
     
     df = yf.download(symbol, period=period, progress=False, auto_adjust=False)
@@ -104,7 +104,7 @@ def write_partitions(df: pd.DataFrame, root: Path, fname: str) -> None:
     for d, g in df.groupby(df["date"].dt.strftime("%Y-%m-%d")):
         outdir = root / f"date={d}"
         outdir.mkdir(parents=True, exist_ok=True)
-        outpath = outdir / f"{fname}.parquet "
+        outpath = outdir / f"{fname}.parquet"
         g.to_parquet(outpath, index=False)
 
 
