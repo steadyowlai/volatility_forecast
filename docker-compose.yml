@@ -1,10 +1,22 @@
 version: '3.8'
 
 services:
-  # Ingest Service - Downloads market data from Yahoo Finance
+  #base Image; contains common dependencies for all services
+  base:
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+    image: vf-base
+
+  # ingest Service; downloads market data from Yahoo Finance
   ingest:
+    build:
+      context: .
+      dockerfile: services/ingest/Dockerfile
     image: vf-ingest
     container_name: vf-ingest
+    depends_on:
+      - base
     env_file:
       - .env
     volumes:
@@ -13,8 +25,12 @@ services:
 
   # Future services will be added here:
   # features:
+  #   build:
+  #     context: .
+  #     dockerfile: services/features/Dockerfile
   #   image: vf-features
   #   depends_on:
+  #     - base
   #     - ingest
   #   env_file:
   #     - .env
@@ -22,8 +38,12 @@ services:
   #     - ./data:/app/data
   
   # train:
+  #   build:
+  #     context: .
+  #     dockerfile: services/train/Dockerfile
   #   image: vf-train
   #   depends_on:
+  #     - base
   #     - features
   #   env_file:
   #     - .env
@@ -32,8 +52,12 @@ services:
   #     - ./artifacts:/app/artifacts
   
   # infer:
+  #   build:
+  #     context: .
+  #     dockerfile: services/infer/Dockerfile
   #   image: vf-infer
   #   depends_on:
+  #     - base
   #     - train
   #   env_file:
   #     - .env
@@ -42,10 +66,14 @@ services:
   #     - ./artifacts:/app/artifacts
   
   # api:
+  #   build:
+  #     context: .
+  #     dockerfile: services/api/Dockerfile
   #   image: vf-api
   #   ports:
   #     - "8000:8000"
   #   depends_on:
+  #     - base
   #     - infer
   #   env_file:
   #     - .env
@@ -54,10 +82,14 @@ services:
   #     - ./artifacts:/app/artifacts
   
   # dashboard:
+  #   build:
+  #     context: .
+  #     dockerfile: services/dashboard/Dockerfile
   #   image: vf-dashboard
   #   ports:
   #     - "8501:8501"
   #   depends_on:
+  #     - base
   #     - infer
   #   env_file:
   #     - .env

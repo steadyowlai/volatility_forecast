@@ -29,6 +29,12 @@ def download_one(symbol: str, period: str = LOOKBACK_PERIOD) -> pd.DataFrame:
     Args:
         symbol: Ticker symbol to download
         period: Lookback period (default: 10y). Valid periods: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
+    
+    TODO (Level 2): Implement incremental updates
+        - Check last date in existing data
+        - Only download new data since last date
+        - Add --force-refresh flag to re-download everything
+        - This will improve efficiency for daily production runs
     """
     
     df = yf.download(symbol, period=period, progress=False, auto_adjust=False)

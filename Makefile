@@ -6,19 +6,21 @@ help: ## List available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' Makefile | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 # Docker Build Commands
-build: build-base build-ingest ## Build all Docker images
+build: ## Build all Docker images
+	docker-compose build
 
 build-base: ## Build base Docker image
-	docker build -t vf-base -f Dockerfile.base .
+	docker-compose build base
 
 build-ingest: ## Build ingest service image
-	docker build -t vf-ingest -f services/ingest/Dockerfile .
+	docker-compose build ingest
 
 # Docker Run Commands
 run-ingest: ## Run ingest service (downloads market data)
 	docker-compose up ingest
 
-ingest: build-ingest run-ingest ## Build and run ingest service
+ingest: ## Build and run ingest service
+	docker-compose up --build ingest
 
 # Data Management
 verify-data: ## Verify ingested data
