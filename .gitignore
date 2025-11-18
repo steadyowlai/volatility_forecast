@@ -1,7 +1,25 @@
+# Python
 __pycache__/
 *.pyc
+
+# Environment
 .env
+
+# Data and artifacts
 data/
 artifacts/
+
+# Virtual environments
 .venv/
+
+# Local development
 local/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
