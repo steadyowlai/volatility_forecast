@@ -15,6 +15,9 @@ build-base: ## Build base Docker image
 build-ingest: ## Build ingest service image
 	docker-compose build ingest
 
+build-features: ## Build features service image
+	docker-compose build features
+
 # Docker Run Commands
 run-ingest: ## Run ingest service (downloads market data)
 	docker-compose up ingest
@@ -22,20 +25,42 @@ run-ingest: ## Run ingest service (downloads market data)
 ingest: ## Build and run ingest service
 	docker-compose up --build ingest
 
+run-features: ## Run features service (computes 21 Level 1 features)
+	docker-compose up features
+
+features: ## Build and run features service
+	docker-compose up --build features
+
+# Pipeline Commands - run multiple services in sequence
+pipeline: ## Run full pipeline: ingest → features
+	@echo "Running data pipeline..."
+	@echo "Step 1/2: Ingesting market data..."
+	docker-compose up ingest
+	@echo "Step 2/2: Computing features..."
+	docker-compose up features
+	@echo "Pipeline complete!"
+
 # Data Management
-verify-data: ## Verify ingested data
+verify-data: ## Verify ingested data and features
+	@echo "📊 Data Pipeline Status"
+	@echo "======================="
+	@echo ""
 	@echo "Raw market partitions:"
 	@ls data/raw.market 2>/dev/null | wc -l || echo "0"
+	@echo ""
 	@echo "Curated market partitions:"
 	@ls data/curated.market 2>/dev/null | wc -l || echo "0"
 	@echo ""
-	@echo "Date range:"
+	@echo "Feature partitions:"
+	@ls data/features.L1 2>/dev/null | wc -l || echo "0"
+	@echo ""
+	@echo "Date range (raw data):"
 	@ls data/raw.market 2>/dev/null | head -1 || echo "No data"
 	@echo "to"
 	@ls data/raw.market 2>/dev/null | tail -1 || echo "No data"
 
 clean-data: ## Remove all downloaded data (use with caution!)
-	rm -rf data/raw.market data/curated.market
+	rm -rf data/raw.market data/curated.market data/features.L1
 
 # Local Development
 venv: ## Create a local virtual environment at .venv

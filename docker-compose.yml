@@ -8,7 +8,8 @@ services:
       dockerfile: Dockerfile.base
     image: vf-base
 
-  # ingest Service; downloads market data from Yahoo Finance
+  # Ingest Service: downloads market data from Yahoo Finance
+  # Run this first to get raw data into data/curated.market/
   ingest:
     build:
       context: .
@@ -23,19 +24,23 @@ services:
       - ./data:/app/data
     command: ["python", "services/ingest/app.py"]
 
+  # Features Service: computes 21 Level 1 features from curated data
+  # Reads from data/curated.market/, writes to data/features.L1/
+  # Run this after ingest to generate features
+  features:
+    build:
+      context: .
+      dockerfile: services/features/Dockerfile
+    image: vf-features
+    container_name: vf-features
+    depends_on:
+      - base
+      - ingest
+    volumes:
+      - ./data:/app/data
+    command: ["python", "services/features/app.py"]
+
   # Future services will be added here:
-  # features:
-  #   build:
-  #     context: .
-  #     dockerfile: services/features/Dockerfile
-  #   image: vf-features
-  #   depends_on:
-  #     - base
-  #     - ingest
-  #   env_file:
-  #     - .env
-  #   volumes:
-  #     - ./data:/app/data
   
   # train:
   #   build:
