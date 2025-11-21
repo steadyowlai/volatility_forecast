@@ -6,8 +6,8 @@
 
 FROM vf-base AS ingest 
 # ---- Ingest-specific dependencies (base deps already in vf-base) ----
-COPY requirements/ingest.txt /tmp/ingest.txt
-RUN pip install --no-cache-dir -r /tmp/ingest.txt
+COPY services/ingest/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # ---- Working directory ----
 WORKDIR /app

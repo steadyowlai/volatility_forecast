@@ -17,5 +17,5 @@ RUN apt-get update && \
 WORKDIR /app
 
 # ---- Install Base Python Dependencies ----
-COPY requirements/base.txt /tmp/base.txt
-RUN pip install --no-cache-dir -r /tmp/base.txt
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
