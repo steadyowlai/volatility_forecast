@@ -69,8 +69,17 @@ venv: ## Create a local virtual environment at .venv
 install: venv ## Install base dependencies into .venv
 	. .venv/bin/activate; pip install -U pip && pip install -r requirements/base.txt
 
-test: ## Run tests (placeholder for later)
-	@echo "Tests not implemented yet"
+test: ## Run all tests with coverage
+	docker-compose up --build test
+
+test-unit: ## Run only unit tests
+	docker-compose run --rm test pytest tests/unit/ -v
+
+test-integration: ## Run only integration tests
+	docker-compose run --rm test pytest tests/integration/ -v
+
+test-coverage: ## Run tests and generate HTML coverage report
+	docker-compose run --rm test pytest tests/ -v --cov=services --cov=libs --cov-report=term-missing --cov-report=html
 
 # Cleanup
 clean: ## Remove caches and temporary files
