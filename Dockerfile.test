@@ -1,0 +1,23 @@
+# test image with all dependencies from all services plus test tools
+FROM vf-base AS test
+
+#install ingest dependencies
+COPY services/ingest/requirements.txt /tmp/requirements_ingest.txt
+RUN pip install --no-cache-dir -r /tmp/requirements_ingest.txt
+
+#install test dependencies
+COPY requirements/test.txt /tmp/requirements_test.txt
+RUN pip install --no-cache-dir -r /tmp/requirements_test.txt
+
+WORKDIR /app
+
+#copy all code that tests need
+COPY libs/ ./libs/
+COPY services/ ./services/
+COPY tests/ ./tests/
+COPY config/ ./config/
+
+ENV PYTHONPATH=/app
+
+#run pytest by default
+CMD ["pytest", "tests/", "-v", "--cov=services", "--cov=libs", "--cov-report=term-missing"]
