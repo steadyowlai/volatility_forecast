@@ -1,22 +1,11 @@
 """
-Production Monitoring Service - Dual Model Strategy
+monitor service - dual model strategy
 
-Monitors model performance using two complementary approaches:
+two complementary monitoring approaches:
+1. drift detection using model A 90pct on validation holdout
+2. model comparison on new data to pick winner A vs B
 
-1. DRIFT DETECTION (using Model A - 90%):
-   - Model A trained on 90% of data, validated on 10% holdout
-   - Track Model A's performance on the validation set (10%) over time
-   - Detect if performance degrades vs baseline
-   
-2. MODEL COMPARISON (both models on new predictions):
-   - Every time we get NEW actual data (ground truth)
-   - Compare Model A (90%) vs Model B (100%) predictions
-   - Track which model performs better on truly new data
-   - Decision: Use Model B if it consistently outperforms Model A
-
-Purpose: 
-- Detect when model performance degrades (drift)
-- Empirically determine which model (90% vs 100%) performs better on new data
+determines which model performs better in production
 """
 
 import os
@@ -31,7 +20,7 @@ import mlflow.sklearn
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 
-# Configuration
+#config
 DATA_CURATED = Path("data/curated.market")
 DATA_FEATURES = Path("data/features.L1")
 MASTER_DATASET = Path("data/master_dataset.parquet")
@@ -41,7 +30,7 @@ MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 
 
 def load_validation_baseline():
-    """Load validation baseline from training service."""
+    """load validation baseline from training service"""
     baseline_path = MODELS_DIR / "validation_baseline.json"
     if not baseline_path.exists():
         raise FileNotFoundError(
@@ -56,7 +45,7 @@ def load_validation_baseline():
 
 
 def load_dual_model_baseline():
-    """Load dual model baseline with both Model A and Model B info."""
+    """load dual model baseline with both model A and model B info"""
     baseline_path = MODELS_DIR / "dual_model_baseline.json"
     if not baseline_path.exists():
         raise FileNotFoundError(
@@ -71,13 +60,7 @@ def load_dual_model_baseline():
 
 
 def load_trained_model(model_name="latest_ensemble"):
-    """
-    Load a trained ensemble model.
-    
-    Args:
-        model_name: Name of the model file (without .pkl extension)
-                   Options: "latest_ensemble", "model_90pct", "model_100pct"
-    """
+    """load trained ensemble model"""
     model_path = MODELS_DIR / f"{model_name}.pkl"
     if not model_path.exists():
         raise FileNotFoundError(f"Trained model not found at {model_path}")
@@ -89,18 +72,14 @@ def load_trained_model(model_name="latest_ensemble"):
 
 
 def load_master_dataset():
-    """
-    Load pre-computed master dataset from prepare_dataset service.
-    
-    This ensures consistency with training - both use the exact same data source.
-    """
+    """load master dataset from prepare_dataset service"""
     if not MASTER_DATASET.exists():
         raise FileNotFoundError(
             f"Master dataset not found at {MASTER_DATASET}. "
             f"Run prepare_dataset service first: docker-compose up prepare_dataset"
         )
     
-    print(f"loading master dataset from {MASTER_DATASET}...")
+    print(f"loading master dataset from {MASTER_DATASET}")
     df = pd.read_parquet(MASTER_DATASET)
     df['date'] = pd.to_datetime(df['date'])
     
@@ -110,28 +89,14 @@ def load_master_dataset():
 
 
 def save_monitoring_record(dual_baseline, comparisons, drift_pct_model_a, recommendation, test_window_info):
-    """
-    Save monitoring results to historical log (JSONL format).
-    
-    Each line is a JSON record of one monitoring run. This allows tracking:
-    - Performance trends over time as models are retrained
-    - How each training iteration performs on its respective test set
-    - Whether model quality is degrading or improving
-    
-    Args:
-        dual_baseline: Model training info (dates, sample counts)
-        comparisons: List of comparison results on test windows
-        drift_pct_model_a: Drift percentage for Model A
-        recommendation: Which model to use (A or B)
-        test_window_info: Info about the test data used
-    """
+    """save monitoring results to jsonl history file"""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     
     record = {
         'timestamp': datetime.now().isoformat(),
         'monitoring_date': datetime.now().strftime('%Y-%m-%d'),
         
-        # Model training info
+        #model training info
         'model_a': {
             'training_samples': dual_baseline['model_a']['training_samples'],
             'training_date_start': dual_baseline['model_a']['training_date_start'],
@@ -143,14 +108,14 @@ def save_monitoring_record(dual_baseline, comparisons, drift_pct_model_a, recomm
             'training_date_end': dual_baseline['model_b']['training_date_end'],
         },
         
-        # Test data info
+        #test data info
         'test_window': {
             'n_samples': test_window_info['n_samples'],
             'date_start': test_window_info['date_start'],
             'date_end': test_window_info['date_end'],
         },
         
-        # Performance results
+        #performance results
         'drift': {
             'model_a_drift_pct': drift_pct_model_a,
         },
@@ -162,7 +127,7 @@ def save_monitoring_record(dual_baseline, comparisons, drift_pct_model_a, recomm
         },
         'recommendation': recommendation,
         
-        # All window comparisons
+        #all window comparisons
         'windows': [
             {
                 'name': c['window_name'],
@@ -175,20 +140,15 @@ def save_monitoring_record(dual_baseline, comparisons, drift_pct_model_a, recomm
         ] if comparisons else []
     }
     
-    # Append to JSONL file (one JSON per line)
+    #append to jsonl file
     with open(MONITORING_HISTORY, 'a') as f:
         f.write(json.dumps(record) + '\n')
     
-    print(f"✓ Saved monitoring record to {MONITORING_HISTORY}")
+    print(f"saved monitoring record {MONITORING_HISTORY}")
 
 
 def load_monitoring_history():
-    """
-    Load historical monitoring records.
-    
-    Returns:
-        List of monitoring records (dicts), or empty list if no history
-    """
+    """load historical monitoring records"""
     if not MONITORING_HISTORY.exists():
         return []
     
@@ -202,25 +162,18 @@ def load_monitoring_history():
 
 
 def analyze_monitoring_trends(history):
-    """
-    Analyze trends in monitoring history.
-    
-    Shows:
-    - Performance trend over time
-    - Whether models are improving or degrading
-    - Historical comparison of training iterations
-    """
+    """analyze trends in monitoring history"""
     if len(history) == 0:
-        print("\n📊 No historical monitoring data available yet")
+        print("\nno historical monitoring data available yet")
         return
     
     print("\n" + "="*70)
-    print("📊 MONITORING HISTORY - Performance Trends")
+    print("monitoring history performance trends")
     print("="*70)
     
-    print(f"\nTotal monitoring runs: {len(history)}")
+    print(f"\ntotal monitoring runs {len(history)}")
     
-    # Show last 5 runs
+    #show last 5 runs
     recent_runs = history[-5:]
     
     print("\n" + "-"*70)
@@ -239,38 +192,29 @@ def analyze_monitoring_trends(history):
     
     print("-"*70)
     
-    # Trend analysis
+    #trend analysis
     if len(history) >= 2:
-        print("\n📈 Trend Analysis:")
+        print("\ntrend analysis")
         
-        # Model A performance trend
+        #model A performance trend
         recent_a_rmse = [r['comparison']['model_a_rmse'] for r in history[-3:] if r['comparison']['model_a_rmse']]
         if len(recent_a_rmse) >= 2:
             trend_a = "improving" if recent_a_rmse[-1] < recent_a_rmse[0] else "degrading"
             change_a = ((recent_a_rmse[-1] / recent_a_rmse[0]) - 1) * 100
-            print(f"  Model A: {trend_a} ({change_a:+.2f}% over last {len(recent_a_rmse)} runs)")
+            print(f"model A {trend_a} {change_a:+.2f}% over last {len(recent_a_rmse)} runs")
         
-        # Model B performance trend
+        #model B performance trend
         recent_b_rmse = [r['comparison']['model_b_rmse'] for r in history[-3:] if r['comparison']['model_b_rmse']]
         if len(recent_b_rmse) >= 2:
             trend_b = "improving" if recent_b_rmse[-1] < recent_b_rmse[0] else "degrading"
             change_b = ((recent_b_rmse[-1] / recent_b_rmse[0]) - 1) * 100
-            print(f"  Model B: {trend_b} ({change_b:+.2f}% over last {len(recent_b_rmse)} runs)")
+            print(f"model B {trend_b} {change_b:+.2f}% over last {len(recent_b_rmse)} runs")
     
     print("="*70)
 
 
 def make_predictions(monitoring_df, model_artifact):
-    """
-    Generate predictions on monitoring window using trained model.
-    
-    Args:
-        monitoring_df: DataFrame with features and actuals
-        model_artifact: Loaded model from pickle
-    
-    Returns:
-        predictions array
-    """
+    """generate predictions using trained model"""
     feature_cols = model_artifact['feature_cols']
     xgb_model = model_artifact['xgb_model']
     lgbm_model = model_artifact['lgbm_model']
@@ -292,7 +236,7 @@ def make_predictions(monitoring_df, model_artifact):
 
 
 def calculate_metrics(y_true, y_pred):
-    """Calculate performance metrics."""
+    """calculate performance metrics"""
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     mae = mean_absolute_error(y_true, y_pred)
     r2 = r2_score(y_true, y_pred)
@@ -324,74 +268,48 @@ def calculate_metrics(y_true, y_pred):
 
 
 def detect_performance_drift(rmse, baseline_rmse):
-    """
-    Check if model performance has degraded significantly.
-    
-    With a 10% window (400+ samples), we have statistical significance.
-    
-    Thresholds:
-    - >20%: Severe drift - retrain immediately
-    - 10-20%: Moderate drift - investigate and plan retraining
-    - 5-10%: Minor drift - monitor closely
-    - <5%: Normal variation - ok
-    """
+    """check if model performance has degraded"""
     rmse_vs_baseline = ((rmse / baseline_rmse) - 1) * 100
     
     if rmse_vs_baseline > 20:
         alert_level = 'critical'
-        message = f"CRITICAL: performance degraded by {rmse_vs_baseline:.1f}% - retrain immediately"
+        message = f"critical performance degraded by {rmse_vs_baseline:.1f}% retrain immediately"
     elif rmse_vs_baseline > 10:
         alert_level = 'warning'
-        message = f"warning: performance degraded by {rmse_vs_baseline:.1f}% - investigate and plan retraining"
+        message = f"warning performance degraded by {rmse_vs_baseline:.1f}% investigate and plan retraining"
     elif rmse_vs_baseline > 5:
         alert_level = 'monitor'
-        message = f"minor drift detected: {rmse_vs_baseline:.1f}% - monitor closely"
+        message = f"minor drift detected {rmse_vs_baseline:.1f}% monitor closely"
     else:
         alert_level = 'ok'
-        message = f"performance stable: {rmse_vs_baseline:+.1f}% vs training baseline"
+        message = f"performance stable {rmse_vs_baseline:+.1f}% vs training baseline"
     
     return alert_level, message, rmse_vs_baseline
 
 
 def compare_models_on_window(monitoring_df, model_a_artifact, model_b_artifact, window_name, 
                             model_a_cutoff, model_b_cutoff):
-    """
-    Compare Model A and Model B on a monitoring window.
-    
-    SAFETY: Filters out any data before training cutoff dates to ensure
-    we only test on data the models have NOT seen during training.
-    
-    Args:
-        monitoring_df: DataFrame with features and actuals
-        model_a_artifact: Model A (90%) artifact
-        model_b_artifact: Model B (100%) artifact
-        window_name: Name of the window for display
-        model_a_cutoff: Last date Model A was trained on (exclusive)
-        model_b_cutoff: Last date Model B was trained on (exclusive)
-    
-    Returns:
-        dict with comparison results
-    """
-    # SAFETY CHECK: Filter out training data
-    # Only use data AFTER the latest cutoff date
+    """compare model A and model B on monitoring window"""
+    #safety check: filter out training data
+    #only use data after the latest cutoff date
     latest_cutoff = max(model_a_cutoff, model_b_cutoff)
     monitoring_df_filtered = monitoring_df[monitoring_df['date'] > latest_cutoff].copy()
     
     if len(monitoring_df_filtered) == 0:
-        # No valid data after cutoff
+        #no valid data after cutoff
         return None
     
     actuals = monitoring_df_filtered['rv_5d'].values
     
-    # Generate predictions from both models
+    #generate predictions from both models
     pred_a = make_predictions(monitoring_df_filtered, model_a_artifact)
     pred_b = make_predictions(monitoring_df_filtered, model_b_artifact)
     
-    # Calculate metrics for both
+    #calculate metrics for both
     metrics_a = calculate_metrics(actuals, pred_a)
     metrics_b = calculate_metrics(actuals, pred_b)
     
-    # Determine winner
+    #determine winner
     winner = "Model B" if metrics_b['rmse'] < metrics_a['rmse'] else "Model A"
     rmse_diff_pct = ((metrics_b['rmse'] / metrics_a['rmse']) - 1) * 100
     
@@ -410,21 +328,16 @@ def compare_models_on_window(monitoring_df, model_a_artifact, model_b_artifact, 
 
 
 def print_model_comparison_summary(comparisons, dual_baseline, drift_pct_model_a):
-    """
-    Print a summary of dual model comparisons.
-    
-    Returns:
-        recommendation: String indicating which model to use
-    """
+    """print summary of dual model comparisons"""
     print("\n" + "="*70)
-    print("DUAL MODEL COMPARISON - Model A (90%) vs Model B (100%)")
+    print("dual model comparison model A 90pct vs model B 100pct")
     print("="*70)
     
-    print("\nModel Training Info:")
-    print(f"  Model A: {dual_baseline['model_a']['training_samples']} samples "
-          f"({dual_baseline['model_a']['training_date_start']} to {dual_baseline['model_a']['training_date_end']})")
-    print(f"  Model B: {dual_baseline['model_b']['training_samples']} samples "
-          f"({dual_baseline['model_b']['training_date_start']} to {dual_baseline['model_b']['training_date_end']})")
+    print("\nmodel training info")
+    print(f"model A {dual_baseline['model_a']['training_samples']} samples "
+          f"{dual_baseline['model_a']['training_date_start']} to {dual_baseline['model_a']['training_date_end']}")
+    print(f"model B {dual_baseline['model_b']['training_samples']} samples "
+          f"{dual_baseline['model_b']['training_date_start']} to {dual_baseline['model_b']['training_date_end']}")
     
     print("\n" + "-"*70)
     print(f"{'Window':<20} {'Samples':>8} {'Model A RMSE':>13} {'Model B RMSE':>13} {'Winner':>10}")
@@ -434,10 +347,9 @@ def print_model_comparison_summary(comparisons, dual_baseline, drift_pct_model_a
     total_windows = len(comparisons)
     
     for comp in comparisons:
-        winner_symbol = "✓" if comp['winner'] == "Model B" else "✓"
         print(f"{comp['window_name']:<20} {comp['n_samples']:>8} "
               f"{comp['model_a_rmse']:>13.6f} {comp['model_b_rmse']:>13.6f} "
-              f"{comp['winner']:>9} {winner_symbol}")
+              f"{comp['winner']:>10}")
         
         if comp['winner'] == "Model B":
             model_b_wins += 1
@@ -446,28 +358,28 @@ def print_model_comparison_summary(comparisons, dual_baseline, drift_pct_model_a
     
     model_b_win_rate = (model_b_wins / total_windows) * 100 if total_windows > 0 else 0
     
-    print(f"\nModel B Win Rate: {model_b_wins}/{total_windows} ({model_b_win_rate:.1f}%)")
+    print(f"\nmodel B win rate {model_b_wins}/{total_windows} {model_b_win_rate:.1f}%")
     
-    # Decision logic
+    #decision logic
     print("\n" + "="*70)
-    print("DECISION LOGIC")
+    print("decision logic")
     print("="*70)
     
-    print(f"\nModel A drift on validation set: {drift_pct_model_a:+.2f}%")
-    print(f"Model B win rate: {model_b_win_rate:.1f}%")
+    print(f"\nmodel A drift on validation set {drift_pct_model_a:+.2f}%")
+    print(f"model B win rate {model_b_win_rate:.1f}%")
     
     if model_b_win_rate >= 75 and abs(drift_pct_model_a) < 10:
         recommendation = "USE MODEL B (100%)"
-        reason = "Model B wins ≥75% of windows AND Model A drift < 10%"
+        reason = f"model B wins {model_b_win_rate:.1f}% >= 75% and model A drift {drift_pct_model_a:+.2f}% < 10%"
     else:
         recommendation = "USE MODEL A (90%)"
         if model_b_win_rate < 75:
-            reason = f"Model B win rate ({model_b_win_rate:.1f}%) < 75% threshold"
+            reason = f"model B win rate {model_b_win_rate:.1f}% < 75% threshold"
         else:
-            reason = f"Model A drift ({drift_pct_model_a:+.1f}%) exceeds 10% threshold"
+            reason = f"model A drift {drift_pct_model_a:+.1f}% exceeds 10% threshold"
     
-    print(f"\nRECOMMENDATION: {recommendation}")
-    print(f"Reason: {reason}")
+    print(f"\nrecommendation {recommendation}")
+    print(f"reason {reason}")
     
     print("="*70)
     
@@ -476,128 +388,124 @@ def print_model_comparison_summary(comparisons, dual_baseline, drift_pct_model_a
 
 def main():
     print("="*70)
-    print("Volatility Forecasting - Dual Model Monitoring Service")
+    print("volatility forecasting dual model monitoring")
     print("="*70)
     
-    # Load dual model baseline
-    print("\nLoading dual model baseline...")
+    #load dual model baseline
+    print("\nloading dual model baseline")
     try:
         dual_baseline = load_dual_model_baseline()
-        print(f"Model A trained on: {dual_baseline['model_a']['training_date_start']} to "
+        print(f"model A trained on {dual_baseline['model_a']['training_date_start']} to "
               f"{dual_baseline['model_a']['training_date_end']}")
-        print(f"Model B trained on: {dual_baseline['model_b']['training_date_start']} to "
+        print(f"model B trained on {dual_baseline['model_b']['training_date_start']} to "
               f"{dual_baseline['model_b']['training_date_end']}")
     except FileNotFoundError as e:
-        print(f"Error: {e}")
+        print(f"error {e}")
         return
     
-    # Load validation baseline for drift detection
-    print("\nLoading validation baseline for drift detection...")
+    #load validation baseline for drift detection
+    print("\nloading validation baseline for drift detection")
     try:
         val_baseline = load_validation_baseline()
         baseline_rmse = val_baseline['validation_rmse']
-        print(f"Model A validation RMSE baseline: {baseline_rmse:.6f}")
+        print(f"model A validation rmse baseline {baseline_rmse:.6f}")
     except FileNotFoundError as e:
-        print(f"Error: {e}")
+        print(f"error {e}")
         return
     
-    # Load both models
-    print("\nLoading Model A (90%)...")
+    #load both models
+    print("\nloading model A 90pct")
     try:
         model_a = load_trained_model("model_90pct")
-        print(f"✓ Model A loaded: ensemble with {len(model_a['feature_cols'])} features")
+        print(f"model A loaded ensemble with {len(model_a['feature_cols'])} features")
     except FileNotFoundError as e:
-        print(f"Error: {e}")
+        print(f"error {e}")
         return
     
-    print("\nLoading Model B (100%)...")
+    print("\nloading model B 100pct")
     try:
         model_b = load_trained_model("model_100pct")
-        print(f"✓ Model B loaded: ensemble with {len(model_b['feature_cols'])} features")
+        print(f"model B loaded ensemble with {len(model_b['feature_cols'])} features")
     except FileNotFoundError as e:
-        print(f"Error: {e}")
+        print(f"error {e}")
         return
     
-    # Load master dataset
-    print("\nLoading master dataset...")
+    #load master dataset
+    print("\nloading master dataset")
     master_df = load_master_dataset()
     
-    # ===================================================================
-    # PART 1: DRIFT DETECTION (Model A on validation set)
-    # ===================================================================
+    #part 1: drift detection
     print("\n" + "="*70)
-    print("PART 1: DRIFT DETECTION")
+    print("part 1 drift detection")
     print("="*70)
-    print("\nUsing Model A (90%) to detect drift on validation set...")
+    print("\nusing model A 90pct to detect drift on validation set")
     
-    # Get validation date range from baseline
+    #get validation date range from baseline
     val_date_end = pd.to_datetime(dual_baseline['model_a']['training_date_end'])
     
-    # Create validation window (data after Model A's training cutoff)
+    #create validation window
     val_df = master_df[master_df['date'] > val_date_end].copy()
     
     if len(val_df) == 0:
-        print("⚠ No validation data available (all data was used in training)")
-        print("  This is expected if Model B used 100% of available data")
+        print("no validation data available all data was used in training")
+        print("this is expected if model B used 100pct of available data")
     else:
-        print(f"\nValidation window: {len(val_df)} samples")
-        print(f"  Date range: {val_df['date'].min().date()} to {val_df['date'].max().date()}")
+        print(f"\nvalidation window {len(val_df)} samples")
+        print(f"date range {val_df['date'].min().date()} to {val_df['date'].max().date()}")
         
-        # Make predictions with Model A
+        #make predictions with model A
         val_pred = make_predictions(val_df, model_a)
         val_actual = val_df['rv_5d'].values
         
-        # Calculate metrics
+        #calculate metrics
         val_metrics = calculate_metrics(val_actual, val_pred)
         
-        # Detect drift
+        #detect drift
         alert_level, alert_message, rmse_vs_baseline = detect_performance_drift(
             val_metrics['rmse'], baseline_rmse
         )
         
-        # Print results
-        print(f"\nModel A on validation set:")
-        print(f"  Current RMSE:  {val_metrics['rmse']:.6f}")
-        print(f"  Baseline RMSE: {baseline_rmse:.6f}")
-        print(f"  Drift: {rmse_vs_baseline:+.2f}%")
+        #print results
+        print(f"\nmodel A on validation set")
+        print(f"current rmse {val_metrics['rmse']:.6f}")
+        print(f"baseline rmse {baseline_rmse:.6f}")
+        print(f"drift {rmse_vs_baseline:+.2f}%")
         print(f"\n{alert_message}")
     
-    # ===================================================================
-    # PART 2: DUAL MODEL COMPARISON
-    # ===================================================================
+    #part 2: dual model comparison
     print("\n" + "="*70)
-    print("PART 2: DUAL MODEL COMPARISON")
+    print("part 2 dual model comparison")
     print("="*70)
-    print("\n⚠️  SAFETY: Explicit date filtering to exclude training data")
-    print(f"   Model A trained up to: {dual_baseline['model_a']['training_date_end']}")
-    print(f"   Model B trained up to: {dual_baseline['model_b']['training_date_end']}")
+    print("\nsafety explicit date filtering to exclude training data")
+    print(f"model A trained up to {dual_baseline['model_a']['training_date_end']}")
+    print(f"model B trained up to {dual_baseline['model_b']['training_date_end']}")
     
-    # Get training cutoff dates from baseline
+    #get training cutoff dates from baseline
     model_a_cutoff = pd.to_datetime(dual_baseline['model_a']['training_date_end'])
     model_b_cutoff = pd.to_datetime(dual_baseline['model_b']['training_date_end'])
     
-    print(f"\n   Using latest cutoff: {max(model_a_cutoff, model_b_cutoff).date()}")
-    print(f"   Only testing on data AFTER this date (exclusive)")
+    print(f"\nusing latest cutoff {max(model_a_cutoff, model_b_cutoff).date()}")
+    print(f"only testing on data after this date exclusive")
     
-    # Get data after Model B's training cutoff (truly new data for both models)
+    #get data after model B's training cutoff
     latest_cutoff = max(model_a_cutoff, model_b_cutoff)
     new_data_df = master_df[master_df['date'] > latest_cutoff].copy()
     
-    print(f"\nData available after cutoff:")
+    print(f"\ndata available after cutoff")
     if len(new_data_df) > 0:
-        print(f"  ✓ {len(new_data_df)} samples available")
-        print(f"    Date range: {new_data_df['date'].min().date()} to {new_data_df['date'].max().date()}")
+        print(f"{len(new_data_df)} samples available")
+        print(f"date range {new_data_df['date'].min().date()} to {new_data_df['date'].max().date()}")
     else:
-        print(f"  ✗ No new data available yet")
-        print(f"    Latest training cutoff: {latest_cutoff.date()}")
-        print(f"    Latest data in dataset: {master_df['date'].max().date()}")
-        print(f"    Wait for new data after cutoff for fair comparison")
+        print(f"no new data available yet")
+        print(f"latest training cutoff {latest_cutoff.date()}")
+        print(f"latest data in dataset {master_df['date'].max().date()}")
+        print(f"wait for new data after cutoff for fair comparison")
     
     comparisons = []
     
-    # Compare on multiple windows (with explicit date filtering in compare function)
+    #compare on multiple windows
     if len(new_data_df) > 0:
-        # Window 1: All new data
+        #window 1: all new data
         comp = compare_models_on_window(
             new_data_df, model_a, model_b, 
             f"All new data ({len(new_data_df)} samples)",
@@ -606,7 +514,7 @@ def main():
         if comp:
             comparisons.append(comp)
         
-        # Window 2: Last 30 samples of new data (if available)
+        #window 2: last 30 samples
         if len(new_data_df) >= 30:
             last_30_new = new_data_df.tail(30)
             comp = compare_models_on_window(
@@ -617,7 +525,7 @@ def main():
             if comp:
                 comparisons.append(comp)
         
-        # Window 3: Last 10 samples of new data (if available)
+        #window 3: last 10 samples
         if len(new_data_df) >= 10:
             last_10_new = new_data_df.tail(10)
             comp = compare_models_on_window(
@@ -628,7 +536,7 @@ def main():
             if comp:
                 comparisons.append(comp)
         
-        # Window 4: Last 1 sample of new data
+        #window 4: last 1 sample
         if len(new_data_df) >= 1:
             last_1_new = new_data_df.tail(1)
             comp = compare_models_on_window(
@@ -639,15 +547,15 @@ def main():
             if comp:
                 comparisons.append(comp)
     else:
-        print("\n⚠️  CANNOT COMPARE MODELS YET")
-        print("   Reason: No new data after Model B's training cutoff")
-        print("   Action: Wait for new data or retrain models to free up test data")
+        print("\ncannot compare models yet")
+        print("reason no new data after model B training cutoff")
+        print("action wait for new data or retrain models to free up test data")
     
-    # Print comparison summary
+    #print comparison summary
     if comparisons:
         recommendation = print_model_comparison_summary(comparisons, dual_baseline, rmse_vs_baseline if len(val_df) > 0 else 0.0)
         
-        # Save monitoring record to history
+        #save monitoring record to history
         test_window_info = {
             'n_samples': len(new_data_df),
             'date_start': str(new_data_df['date'].min().date()) if len(new_data_df) > 0 else None,
@@ -661,31 +569,22 @@ def main():
             test_window_info
         )
         
-        # Load and analyze historical trends
+        #load and analyze historical trends
         history = load_monitoring_history()
         analyze_monitoring_trends(history)
     
     print("\n" + "="*70)
-    print("Monitoring Complete")
+    print("monitoring complete")
     print("="*70)
-    print("\nNext steps:")
-    print("  - If drift detected: Retrain models with latest data")
-    print("  - If Model B recommended: Update production to use model_100pct.pkl")
-    print("  - If Model A recommended: Continue using model_90pct.pkl")
+    print("\nnext steps")
+    print("if drift detected retrain models with latest data")
+    print("if model B recommended update production to use model_100pct.pkl")
+    print("if model A recommended continue using model_90pct.pkl")
     print("="*70)
 
 
 def prepare_monitoring_dataset(master_df, window_pct=0.1):
-    """
-    Prepare the monitoring dataset: latest 10% of master dataset.
-    
-    Args:
-        master_df: Master dataset with all features and actuals
-        window_pct: Percentage of data to use for monitoring (default 0.1 = 10%)
-    
-    Returns:
-        DataFrame with features and actual RV for monitoring window
-    """
+    """prepare monitoring dataset latest 10pct of master dataset"""
     #ensure sorted by date
     master_df = master_df.sort_values('date').reset_index(drop=True)
     
@@ -694,10 +593,10 @@ def prepare_monitoring_dataset(master_df, window_pct=0.1):
     
     monitoring_df = master_df.iloc[window_start_idx:].copy()
     
-    print(f"\nmonitoring window (latest {int(window_pct*100)}%):")
-    print(f"  samples: {len(monitoring_df)}")
-    print(f"  date range: {monitoring_df['date'].min().date()} to {monitoring_df['date'].max().date()}")
-    print(f"  coverage: {len(monitoring_df)/total_samples*100:.1f}% of all data")
+    print(f"\nmonitoring window latest {int(window_pct*100)}%")
+    print(f"samples {len(monitoring_df)}")
+    print(f"date range {monitoring_df['date'].min().date()} to {monitoring_df['date'].max().date()}")
+    print(f"coverage {len(monitoring_df)/total_samples*100:.1f}% of all data")
     
     return monitoring_df
 
