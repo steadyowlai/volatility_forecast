@@ -1,0 +1,11 @@
+{
+  "ridge_params": {
+    "alpha": 1000.0
+  },
+  "lasso_params": {
+    "alpha": 0.001
+  },
+  "ridge_cv_score": 0.00976044209582112,
+  "lasso_cv_score": 0.010010272529603336,
+  "timestamp": "2026-01-06T17:57:01.906420"
+}

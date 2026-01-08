@@ -17,6 +17,6 @@ curated_market_daily_schema = DataFrameSchema({
     "symbol": Column(str),
     "date": Column(pa.DateTime),
     "close": Column(float),
-    "ret": Column(float, nullable=True),   # null for the first day of each symbol
     "adj_close": Column(float),
+    "ret": Column(float, nullable=True),   # log return = ln(adj_close_t / adj_close_{t-1}), null for first day
 })

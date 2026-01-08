@@ -3,3 +3,6 @@ numpy
 pyarrow
 pandera
 pydantic
+optuna
+lightgbm
+scikit-learn

@@ -1,5 +1,5 @@
 """
-Unit tests for services/features/app.py
+unit tests for services/features/app.py
 
 Tests all feature engineering functions with various edge cases.
 """
@@ -268,7 +268,7 @@ class TestComputeRsi:
         df = pd.DataFrame({
             'symbol': ['SPY'] * 20,
             'date': pd.date_range('2024-01-01', periods=20),
-            'adj_close': np.linspace(100, 120, 20)  # All gains
+            'adj_close': np.linspace(100, 120, 20)  #all gains
         })
         
         result = compute_rsi(df, window=14)
@@ -295,7 +295,7 @@ class TestComputeRsi:
         df = pd.DataFrame({
             'symbol': ['SPY'] * 100,
             'date': pd.date_range('2024-01-01', periods=100),
-            'adj_close': 100 + np.cumsum(np.random.randn(100))  # Random walk
+            'adj_close': 100 + np.cumsum(np.random.randn(100))  #random walk
         })
         
         result = compute_rsi(df, window=14)

@@ -27,13 +27,24 @@ def load_curated_data():
 
 
 def compute_spy_returns(df):
-    """Compute SPY log returns over multiple windows"""
+    """
+    Compute SPY multi-period log returns
+    
+    Uses pre-computed daily log returns from curated data.
+    Multi-period returns are computed by summing daily log returns
+    (log returns are additive).
+    """
     spy = df[df['symbol'] == 'SPY'].copy()
     
-    # Log returns over different windows
+    # Use pre-computed log returns from curated data (efficient!)
     for window in [1, 5, 10, 20, 60]:
         col_name = f'spy_ret_{window}d'
-        spy[col_name] = np.log(spy['adj_close'] / spy['adj_close'].shift(window))
+        if window == 1:
+            # 1-day return is just the daily log return
+            spy[col_name] = spy['ret']
+        else:
+            # Multi-day return = sum of daily log returns (log returns are additive)
+            spy[col_name] = spy['ret'].rolling(window).sum()
     
     # Keep only date and return columns
     ret_cols = ['date'] + [f'spy_ret_{w}d' for w in [1, 5, 10, 20, 60]]
@@ -41,12 +52,17 @@ def compute_spy_returns(df):
 
 
 def compute_spy_volatility(df):
-    """Compute SPY realized volatility using sqrt(sum(r^2))"""
+    """
+    Compute SPY realized volatility using sqrt(sum(r^2))
+    
+    Uses pre-computed daily log returns from curated data.
+    Realized volatility = sqrt(sum of squared log returns)
+    """
     spy = df[df['symbol'] == 'SPY'].copy()
     
     for window in [5, 10, 20, 60]:
         col_name = f'spy_vol_{window}d'
-        # Realized vol: sqrt(sum of squared returns)
+        # Realized vol: sqrt(sum of squared log returns)
         spy[col_name] = spy['ret'].rolling(window).apply(
             lambda x: np.sqrt(np.sum(x**2)), raw=True
         )
@@ -97,8 +113,12 @@ def compute_rsi(df, window=14):
 
 
 def compute_correlations(df):
-    """Compute rolling correlations between SPY and other assets"""
-    # Pivot returns to wide format
+    """
+    Compute rolling correlations between SPY and other assets
+    
+    Uses pre-computed daily log returns from curated data.
+    """
+    # Pivot log returns to wide format
     returns_wide = df.pivot(index='date', columns='symbol', values='ret')
     
     # 20-day correlations

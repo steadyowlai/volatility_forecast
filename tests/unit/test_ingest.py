@@ -1,6 +1,5 @@
 """
-Unit tests for services/ingest/app.py
-
+unit tests for services/ingest/app.py
 Tests all functions in the ingest service with mocking for external dependencies.
 """
 
@@ -10,7 +9,7 @@ import numpy as np
 from pathlib import Path
 import sys
 
-# Add parent directory to path so we can import services
+#add parent directory to path so we can import services
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from services.ingest.app import (

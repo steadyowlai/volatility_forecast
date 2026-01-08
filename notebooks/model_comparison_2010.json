@@ -1,0 +1,44 @@
+{
+  "selected_model": "LightGBM",
+  "selection_date": "2026-01-06T18:24:08.427825",
+  "val_rmse": 0.011316136004404452,
+  "val_r2": 0.44236116833476335,
+  "improvement_pct": 5.110506739036209,
+  "all_models_ranking": [
+    {
+      "Model": "LightGBM",
+      "Val RMSE": 0.011316136004404452,
+      "Val R\u00b2": 0.44236116833476335
+    },
+    {
+      "Model": "Random Forest",
+      "Val RMSE": 0.011379753343988623,
+      "Val R\u00b2": 0.4360736480302997
+    },
+    {
+      "Model": "XGBoost",
+      "Val RMSE": 0.011486209539175181,
+      "Val R\u00b2": 0.42547337317947465
+    },
+    {
+      "Model": "Linear Regression",
+      "Val RMSE": 0.011575803070797565,
+      "Val R\u00b2": 0.4164756929819652
+    }
+  ],
+  "universal_features": [
+    "rv_vix_spread_20d",
+    "vix",
+    "vix_term",
+    "spy_ret_10d",
+    "drawdown_60d"
+  ],
+  "ensemble_selected": {
+    "selected_model": "Stacking Ensemble (XGBoost + LightGBM)",
+    "selection_date": "2026-01-06T18:24:08.986063",
+    "val_rmse": 0.011283515990667684,
+    "val_r2": 0.445571445894153,
+    "improvement_over_baseline_pct": 1.2826174152132097,
+    "improvement_over_best_individual_pct": 1.764668734417429
+  }
+}

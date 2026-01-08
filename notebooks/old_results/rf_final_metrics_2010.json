@@ -1,0 +1,166 @@
+{
+  "model_name": "Random Forest",
+  "selected_approach": "OOB-Optimized",
+  "timestamp": "2025-12-16T16:24:26.074540",
+  "data_info": {
+    "n_train_samples": 3151,
+    "n_val_samples": 788,
+    "n_features": 20
+  },
+  "hyperparameters": {
+    "bootstrap": true,
+    "max_depth": 5,
+    "max_features": "sqrt",
+    "min_samples_leaf": 4,
+    "min_samples_split": 10,
+    "n_estimators": 300,
+    "oob_score_used": true,
+    "oob_r2": 0.643610458079201
+  },
+  "metrics": {
+    "train": {
+      "rmse": 0.008005766272069068,
+      "mae": 0.005469182894399108,
+      "r2": 0.7197633944469259
+    },
+    "validation": {
+      "rmse": 0.009419287402289945,
+      "mae": 0.005707891940564369,
+      "r2": 0.4138305490922479
+    },
+    "generalization": {
+      "train_val_gap_rmse": -0.0014135211302208767,
+      "gap_percentage": -15.0066673820488
+    }
+  },
+  "feature_importance": {
+    "top_10": [
+      {
+        "feature": "vix",
+        "importance": 0.15876367563930763
+      },
+      {
+        "feature": "rv_vix_spread_20d",
+        "importance": 0.1505261966047176
+      },
+      {
+        "feature": "spy_vol_5d",
+        "importance": 0.11813263796024018
+      },
+      {
+        "feature": "drawdown_60d",
+        "importance": 0.089327637611694
+      },
+      {
+        "feature": "spy_vol_10d",
+        "importance": 0.08150227486978678
+      },
+      {
+        "feature": "spy_ret_10d",
+        "importance": 0.06689981125126848
+      },
+      {
+        "feature": "vix_term",
+        "importance": 0.06544288237080668
+      },
+      {
+        "feature": "vix3m",
+        "importance": 0.059658591637474175
+      },
+      {
+        "feature": "spy_ret_20d",
+        "importance": 0.038201105521918875
+      },
+      {
+        "feature": "spy_vol_20d",
+        "importance": 0.03804100708826233
+      }
+    ],
+    "all_features": [
+      {
+        "feature": "vix",
+        "importance": 0.15876367563930763
+      },
+      {
+        "feature": "rv_vix_spread_20d",
+        "importance": 0.1505261966047176
+      },
+      {
+        "feature": "spy_vol_5d",
+        "importance": 0.11813263796024018
+      },
+      {
+        "feature": "drawdown_60d",
+        "importance": 0.089327637611694
+      },
+      {
+        "feature": "spy_vol_10d",
+        "importance": 0.08150227486978678
+      },
+      {
+        "feature": "spy_ret_10d",
+        "importance": 0.06689981125126848
+      },
+      {
+        "feature": "vix_term",
+        "importance": 0.06544288237080668
+      },
+      {
+        "feature": "vix3m",
+        "importance": 0.059658591637474175
+      },
+      {
+        "feature": "spy_ret_20d",
+        "importance": 0.038201105521918875
+      },
+      {
+        "feature": "spy_vol_20d",
+        "importance": 0.03804100708826233
+      },
+      {
+        "feature": "corr_spy_hyg_60d",
+        "importance": 0.02701656621835824
+      },
+      {
+        "feature": "spy_ret_60d",
+        "importance": 0.02548128562915316
+      },
+      {
+        "feature": "rsi_spy_14",
+        "importance": 0.01763104112132741
+      },
+      {
+        "feature": "spy_ret_5d",
+        "importance": 0.0173673013425279
+      },
+      {
+        "feature": "spy_vol_60d",
+        "importance": 0.014690967887172812
+      },
+      {
+        "feature": "corr_spy_hyg_20d",
+        "importance": 0.009480502201948193
+      },
+      {
+        "feature": "corr_spy_tlt_60d",
+        "importance": 0.006261334291193598
+      },
+      {
+        "feature": "hyg_tlt_spread",
+        "importance": 0.005612943419495872
+      },
+      {
+        "feature": "corr_spy_tlt_20d",
+        "importance": 0.0051315254450588965
+      },
+      {
+        "feature": "spy_ret_1d",
+        "importance": 0.004830711888287206
+      }
+    ]
+  },
+  "comparison": {
+    "baseline_val_rmse": 0.009559572215848258,
+    "improvement_pct": 1.4674800335285259
+  }
+}

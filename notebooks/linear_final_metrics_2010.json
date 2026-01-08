@@ -1,0 +1,159 @@
+{
+  "model_name": "Linear Regression (Ridge)",
+  "selected_approach": "Ridge",
+  "timestamp": "2026-01-06T17:57:02.263316",
+  "data_info": {
+    "n_train": 3565,
+    "n_val": 397,
+    "n_features": 20
+  },
+  "hyperparameters": {
+    "alpha": 1000.0
+  },
+  "metrics": {
+    "train": {
+      "rmse": 0.009327248346484948,
+      "mae": 0.005871562267099602,
+      "r2": 0.5868872392652942
+    },
+    "validation": {
+      "rmse": 0.011575803070797565,
+      "mae": 0.006754028833704403,
+      "r2": 0.4164756929819652
+    },
+    "generalization": {
+      "train_val_gap_rmse": -0.0022485547243126167,
+      "gap_percentage": 24.10737487396273
+    }
+  },
+  "feature_importance": {
+    "top_10": [
+      {
+        "feature": "rv_vix_spread_20d",
+        "coefficient": -0.0016772375372596491
+      },
+      {
+        "feature": "vix",
+        "coefficient": 0.0016749326610750695
+      },
+      {
+        "feature": "vix_term",
+        "coefficient": -0.0015923721558157332
+      },
+      {
+        "feature": "spy_vol_5d",
+        "coefficient": 0.001317943638748118
+      },
+      {
+        "feature": "spy_ret_10d",
+        "coefficient": -0.0012930084726670437
+      },
+      {
+        "feature": "spy_vol_10d",
+        "coefficient": 0.0012844849897204681
+      },
+      {
+        "feature": "spy_ret_5d",
+        "coefficient": -0.0009366996830389008
+      },
+      {
+        "feature": "vix3m",
+        "coefficient": 0.0009102254984725058
+      },
+      {
+        "feature": "spy_vol_20d",
+        "coefficient": 0.0007764275641951451
+      },
+      {
+        "feature": "drawdown_60d",
+        "coefficient": 0.000739002107601128
+      }
+    ],
+    "all_features": [
+      {
+        "feature": "rv_vix_spread_20d",
+        "coefficient": -0.0016772375372596491
+      },
+      {
+        "feature": "vix",
+        "coefficient": 0.0016749326610750695
+      },
+      {
+        "feature": "vix_term",
+        "coefficient": -0.0015923721558157332
+      },
+      {
+        "feature": "spy_vol_5d",
+        "coefficient": 0.001317943638748118
+      },
+      {
+        "feature": "spy_ret_10d",
+        "coefficient": -0.0012930084726670437
+      },
+      {
+        "feature": "spy_vol_10d",
+        "coefficient": 0.0012844849897204681
+      },
+      {
+        "feature": "spy_ret_5d",
+        "coefficient": -0.0009366996830389008
+      },
+      {
+        "feature": "vix3m",
+        "coefficient": 0.0009102254984725058
+      },
+      {
+        "feature": "spy_vol_20d",
+        "coefficient": 0.0007764275641951451
+      },
+      {
+        "feature": "drawdown_60d",
+        "coefficient": 0.000739002107601128
+      },
+      {
+        "feature": "spy_ret_20d",
+        "coefficient": -0.000657102064485418
+      },
+      {
+        "feature": "spy_vol_60d",
+        "coefficient": 0.0005696671057027246
+      },
+      {
+        "feature": "corr_spy_hyg_20d",
+        "coefficient": -0.00030926130730204673
+      },
+      {
+        "feature": "corr_spy_tlt_20d",
+        "coefficient": 0.0003089121597107116
+      },
+      {
+        "feature": "corr_spy_hyg_60d",
+        "coefficient": -0.0002716695467626905
+      },
+      {
+        "feature": "hyg_tlt_spread",
+        "coefficient": -0.00026083684765075674
+      },
+      {
+        "feature": "corr_spy_tlt_60d",
+        "coefficient": -0.00022047815482106393
+      },
+      {
+        "feature": "spy_ret_60d",
+        "coefficient": -0.0001472798394783751
+      },
+      {
+        "feature": "rsi_spy_14",
+        "coefficient": 0.000135120736161055
+      },
+      {
+        "feature": "spy_ret_1d",
+        "coefficient": -0.00011638699581395574
+      }
+    ]
+  },
+  "comparison": {
+    "baseline_val_rmse": 0.011430120709467202,
+    "improvement_pct": -1.2745478812808912
+  }
+}

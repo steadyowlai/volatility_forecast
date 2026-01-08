@@ -56,21 +56,103 @@ services:
       - ./data:/app/data
     command: ["pytest", "tests/", "-v", "--cov=services", "--cov=libs", "--cov-report=term-missing"]
 
+  # MLflow Service: tracking server for model registry and experiment tracking
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.2
+    container_name: vf-mlflow
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./mlruns:/mlflow/mlruns
+      - ./data:/mlflow/data
+    command: >
+      mlflow server 
+      --backend-store-uri sqlite:///mlflow/mlruns/mlflow.db
+      --default-artifact-root /mlflow/mlruns/artifacts
+      --host 0.0.0.0
+      --port 5000
+
+  # Dataset Preparation Service: creates and maintains master dataset
+  # Runs daily after features to create data/master_dataset.parquet
+  # This ensures consistency between training and monitoring
+  prepare_dataset:
+    build:
+      context: .
+      dockerfile: services/prepare_dataset/Dockerfile
+    image: vf-prepare-dataset
+    container_name: vf-prepare-dataset
+    depends_on:
+      - base
+      - features
+    volumes:
+      - ./data:/app/data
+    command: ["python", "app.py"]
+
+  # Training Service: trains model with best hyperparameters from tuning
+  # Reads from data/master_dataset.parquet, saves model to MLflow
+  train:
+    build:
+      context: .
+      dockerfile: services/train/Dockerfile
+    image: vf-train
+    container_name: vf-train
+    depends_on:
+      - base
+      - prepare_dataset
+      - mlflow
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    volumes:
+      - ./data:/app/data
+      - ./mlruns:/app/mlruns
+      - ./config:/app/config
+      - ./final_model:/app/final_model
+      - ./models:/app/models
+    command: ["python", "services/train/app.py"]
+
+  # Prediction Service: generates daily volatility forecasts
+  # Loads model from MLflow, reads latest features, predicts next-day volatility
+  predict:
+    build:
+      context: .
+      dockerfile: services/predict/Dockerfile
+    image: vf-predict
+    container_name: vf-predict
+    depends_on:
+      - base
+      - features
+      - train
+      - mlflow
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    volumes:
+      - ./data:/app/data
+      - ./mlruns:/app/mlruns
+      - ./models:/app/models
+    command: ["python", "app.py"]
+
+  # Monitoring Service: tracks production performance and detects drift
+  # Compares past predictions (5+ days old) with actual outcomes
+  # Different from training validation - this monitors live production performance
+  monitor:
+    build:
+      context: .
+      dockerfile: services/monitor/Dockerfile
+    image: vf-monitor
+    container_name: vf-monitor
+    depends_on:
+      - base
+      - predict
+      - mlflow
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    volumes:
+      - ./data:/app/data
+      - ./mlruns:/app/mlruns
+      - ./models:/app/models
+    command: ["python", "app.py"]
+
   # Future services will be added here:
-  
-  # train:
-  #   build:
-  #     context: .
-  #     dockerfile: services/train/Dockerfile
-  #   image: vf-train
-  #   depends_on:
-  #     - base
-  #     - features
-  #   env_file:
-  #     - .env
-  #   volumes:
-  #     - ./data:/app/data
-  #     - ./artifacts:/app/artifacts
   
   # infer:
   #   build:

@@ -15,6 +15,10 @@ coverage.xml
 data/
 artifacts/
 
+# MLflow
+mlruns/
+mlartifacts/
+
 # Virtual environments
 .venv/
 

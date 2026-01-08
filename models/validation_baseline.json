@@ -1,0 +1,13 @@
+{
+  "validation_rmse": 0.011443180557597106,
+  "validation_mae": 0.006813530778214524,
+  "validation_r2": 0.43020905254851605,
+  "timestamp": "2026-01-08T22:12:05.350257",
+  "train_val_split": 0.9,
+  "date_range": {
+    "train_start": "2010-03-31",
+    "train_end": "2024-05-31",
+    "val_start": "2024-06-03",
+    "val_end": "2025-12-31"
+  }
+}

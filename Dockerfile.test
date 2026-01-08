@@ -5,6 +5,14 @@ FROM vf-base AS test
 COPY services/ingest/requirements.txt /tmp/requirements_ingest.txt
 RUN pip install --no-cache-dir -r /tmp/requirements_ingest.txt
 
+#install features dependencies (if separate from base)
+COPY services/features/requirements.txt /tmp/requirements_features.txt
+RUN pip install --no-cache-dir -r /tmp/requirements_features.txt || true
+
+#install training dependencies
+COPY services/train/requirements.txt /tmp/requirements_train.txt
+RUN pip install --no-cache-dir -r /tmp/requirements_train.txt
+
 #install test dependencies
 COPY requirements/test.txt /tmp/requirements_test.txt
 RUN pip install --no-cache-dir -r /tmp/requirements_test.txt

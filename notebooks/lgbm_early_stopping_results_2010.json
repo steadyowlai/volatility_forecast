@@ -1,0 +1,17 @@
+[
+  {
+    "patience": 30,
+    "stopped_at": 481,
+    "val_rmse": 0.011317584193700261
+  },
+  {
+    "patience": 50,
+    "stopped_at": 525,
+    "val_rmse": 0.011316136004404452
+  },
+  {
+    "patience": 100,
+    "stopped_at": 525,
+    "val_rmse": 0.011316136004404452
+  }
+]
