@@ -584,7 +584,6 @@ def main():
     print(f"models/dual_model_baseline.json")
     print(f"data/predictions/predictions.parquet")
     
-    print(f"\nnext: monitor service will compare both models on latest data")
     print("="*70)
 
 
