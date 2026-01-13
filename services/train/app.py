@@ -204,7 +204,7 @@ def train_ensemble(X_train, y_train, X_val, y_val, config, model_name="Ensemble"
         
         val_metrics = {
             'rmse': np.sqrt(mean_squared_error(y_val, ensemble_val_pred)),
-            'mae': mean_absolute_error(y_val, ensemble_val_pred)),
+            'mae': mean_absolute_error(y_val, ensemble_val_pred),
             'r2': r2_score(y_val, ensemble_val_pred)
         }
         
