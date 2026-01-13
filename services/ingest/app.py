@@ -5,11 +5,13 @@ import yfinance as yf
 from pathlib import Path
 from datetime import datetime, timedelta
 
-from libs.schemas import raw_market_schema, curated_market_daily_schema
+from schemas import raw_market_schema, curated_market_daily_schema
+from data_status import get_last_date
 
 # Configuration
 DATA_RAW = Path("data/raw.market")
 DATA_CURATED = Path("data/curated.market")
+MASTER_DATASET = Path("data/master_dataset.parquet")
 
 # Configurable start date (can override via environment variable)
 # Default: 2010-01-01 - Post-financial crisis "new normal" regime
@@ -18,7 +20,7 @@ DATA_CURATED = Path("data/curated.market")
 START_DATE = os.getenv("START_DATE", "2010-01-01")
 
 TICKERS = [
-    "SPY",     # S&P 500 ETF (equity benchmark)
+    "SPY", # S&P 500 ETF (equity benchmark)
     "^VIX",    # CBOE Volatility Index (30-day implied vol)
     "^VIX3M",  # 3-month VIX (90-day implied vol)
     "TLT",     # Long-term US Treasury bond ETF (~20-year duration)
@@ -46,35 +48,76 @@ def get_existing_dates(data_dir: Path) -> list:
 
 def determine_download_range(data_dir: Path, default_start: str) -> tuple:
     """
-    figure out what date range to download
+    Figure out what date range to download.
     
-    returns: (start_date, end_date, is_incremental)
+    Priority:
+    1. Check data_status.json for last_date (from master_dataset)
+    2. Check master_dataset.parquet (fallback)
+    3. Check curated.market/ partitions (local dev fallback)
+    4. Full historical download from default_start
+    
+    Returns: (start_date, end_date, is_incremental)
     """
-    existing_dates = get_existing_dates(data_dir)
-    
     end_date = datetime.now().date()
     
-    if not existing_dates:
-        #no existing data, download from default start
-        start_date = pd.to_datetime(default_start).date()
-        print(f"no existing data found")
-        print(f"will download full history from {start_date}")
-        return start_date, end_date, False
+    # Priority 1: Check data_status.json
+    last_date_str = get_last_date()
+    if last_date_str:
+        last_date = pd.to_datetime(last_date_str).date()
+        print(f"found last_date in data_status.json: {last_date}")
+        start_date = last_date + timedelta(days=1)
+        
+        if start_date >= end_date:
+            print(f"already up to date, nothing to download")
+            return None, None, True
+        
+        days_to_download = (end_date - start_date).days
+        print(f"will download {days_to_download} days from {start_date} to {end_date}")
+        return start_date, end_date, True
     
-    #we have existing data, download only new stuff
-    last_date = max(existing_dates)
-    start_date = last_date + timedelta(days=1)
+    # Priority 2: Check master_dataset.parquet
+    if MASTER_DATASET.exists():
+        try:
+            print("data_status.json not found, checking master_dataset.parquet...")
+            df = pd.read_parquet(MASTER_DATASET, columns=['date'])
+            last_date = pd.to_datetime(df['date']).max().date()
+            print(f"found last date in master_dataset: {last_date}")
+            start_date = last_date + timedelta(days=1)
+            
+            if start_date >= end_date:
+                print(f"already up to date, nothing to download")
+                return None, None, True
+            
+            days_to_download = (end_date - start_date).days
+            print(f"will download {days_to_download} days from {start_date} to {end_date}")
+            return start_date, end_date, True
+        except Exception as e:
+            print(f"warning: could not read master_dataset.parquet: {e}")
+            # Fall through to next priority
     
-    print(f"existing data up to {last_date}")
+    # Priority 3: Check existing curated.market partitions (local dev)
+    existing_dates = get_existing_dates(data_dir)
     
-    if start_date >= end_date:
-        print(f"already up to date, nothing to download")
-        return None, None, True
+    if existing_dates:
+        # We have existing data, download only new stuff
+        last_date = max(existing_dates)
+        print(f"data_status.json and master_dataset not found, checking curated.market/")
+        print(f"found existing data up to {last_date}")
+        start_date = last_date + timedelta(days=1)
+        
+        if start_date >= end_date:
+            print(f"already up to date, nothing to download")
+            return None, None, True
+        
+        days_to_download = (end_date - start_date).days
+        print(f"will download {days_to_download} days from {start_date} to {end_date}")
+        return start_date, end_date, True
     
-    days_to_download = (end_date - start_date).days
-    print(f"will download {days_to_download} days from {start_date} to {end_date}")
-    
-    return start_date, end_date, True
+    # Priority 4: No existing data, download full history
+    start_date = pd.to_datetime(default_start).date()
+    print(f"no existing data found")
+    print(f"will download full history from {start_date}")
+    return start_date, end_date, False
 
 def download_one(symbol: str, start_date: str, end_date: str = None) -> pd.DataFrame:
     """

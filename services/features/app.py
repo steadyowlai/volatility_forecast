@@ -2,22 +2,177 @@
 Feature Engineering Service (Level 1)
 
 Implements all features from local/docs/scope/Level 1 Features.md
+
+Incremental processing: Only computes features for new dates not yet in features.L1/
 """
 
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from datetime import timedelta
+
+from data_status import get_last_date
 
 
-def load_curated_data():
-    """Load all curated market data"""
+def get_available_curated_dates():
+    """Get all dates that have curated data"""
+    curated_path = Path("data/curated.market")
+    files = list(curated_path.glob("date=*/daily.parquet"))
+    
+    dates = []
+    for f in files:
+        date_str = f.parent.name.replace("date=", "")
+        try:
+            dates.append(pd.to_datetime(date_str).date())
+        except:
+            pass
+    
+    return sorted(dates)
+
+
+def get_existing_feature_dates():
+    """Get dates that already have features computed"""
+    features_path = Path("data/features.L1")
+    if not features_path.exists():
+        return []
+    
+    files = list(features_path.glob("date=*/features.parquet"))
+    
+    dates = []
+    for f in files:
+        date_str = f.parent.name.replace("date=", "")
+        try:
+            dates.append(pd.to_datetime(date_str).date())
+        except:
+            pass
+    
+    return sorted(dates)
+
+
+def determine_dates_to_process():
+    """
+    Determine which dates need feature computation.
+    
+    Logic:
+    1. Find last date in master_dataset (from JSON or parquet file)
+    2. Find last date with features (from features.L1/)
+    3. Process the gap between them
+    
+    If no master_dataset exists, process all curated data (first run).
+    
+    Returns:
+        tuple: (dates_to_process, is_full_rebuild)
+    """
+    from datetime import timedelta
+    
+    # Step 1: Find last date in master_dataset
+    last_master_date = None
+    last_master_date_str = get_last_date()
+    
+    if last_master_date_str:
+        # Priority 1: Read from data_status.json (fast)
+        last_master_date = pd.to_datetime(last_master_date_str).date()
+        print(f"found last_date in data_status.json: {last_master_date}")
+    else:
+        # Priority 2: Read master_dataset.parquet (slower)
+        master_path = Path("data/master_dataset.parquet")
+        if master_path.exists():
+            try:
+                print("data_status.json not found, reading master_dataset.parquet...")
+                master_df = pd.read_parquet(master_path)
+                if not master_df.empty:
+                    last_master_date = pd.to_datetime(master_df['date']).max().date()
+                    print(f"found last date in master_dataset.parquet: {last_master_date}")
+            except Exception as e:
+                print(f"warning: could not read master_dataset.parquet: {e}")
+    
+    # If no master_dataset exists, this is a first run
+    if last_master_date is None:
+        print("no master_dataset found - will process all curated data (first run)")
+        available_dates = get_available_curated_dates()
+        if not available_dates:
+            print("ERROR: No curated data available")
+            return [], False
+        print(f"  date range: {available_dates[0]} to {available_dates[-1]}")
+        return available_dates, True
+    
+    # Step 2: Find last date with features
+    last_feature_date = None
+    existing_dates = get_existing_feature_dates()
+    
+    if existing_dates:
+        last_feature_date = max(existing_dates)
+        print(f"found last date in features.L1/: {last_feature_date}")
+    else:
+        print("no existing features found")
+    
+    # Step 3: Determine what to process
+    if last_feature_date is None:
+        # Features don't exist - need to process everything in master_dataset
+        print("will process all dates from master_dataset")
+        master_path = Path("data/master_dataset.parquet")
+        master_df = pd.read_parquet(master_path)
+        all_dates = sorted(pd.to_datetime(master_df['date']).dt.date.unique())
+        print(f"  date range: {all_dates[0]} to {all_dates[-1]}")
+        return all_dates, True
+    
+    elif last_feature_date >= last_master_date:
+        # Features are up to date
+        print("features are up to date - no new dates to process")
+        return [], False
+    
+    else:
+        # Incremental update - generate date range
+        date = last_feature_date + timedelta(days=1)
+        new_dates = []
+        while date <= last_master_date:
+            new_dates.append(date)
+            date += timedelta(days=1)
+        
+        print(f"found {len(new_dates)} new dates to process")
+        print(f"  date range: {new_dates[0]} to {new_dates[-1]}")
+        return new_dates, False
+
+
+def load_curated_data(date_filter=None):
+    """
+    Load curated market data, optionally filtered by dates.
+    
+    For incremental processing, we need context (60 days lookback) for rolling windows.
+    
+    Args:
+        date_filter: list of dates to process (None = load all)
+    """
     curated_path = Path("data/curated.market")
     files = list(curated_path.glob("date=*/daily.parquet"))
     
     if not files:
         raise FileNotFoundError(f"No curated data found in {curated_path}")
     
-    print(f"Loading {len(files)} curated partitions...")
+    # If filtering, load context window for rolling calculations
+    if date_filter:
+        # Need 60 days before first date for rolling windows
+        context_start = min(date_filter) - timedelta(days=70)  # buffer
+        context_end = max(date_filter)
+        
+        date_strs = set()
+        for f in files:
+            date_str = f.parent.name.replace("date=", "")
+            try:
+                file_date = pd.to_datetime(date_str).date()
+                if context_start <= file_date <= context_end:
+                    date_strs.add(date_str)
+            except:
+                pass
+        
+        files = [f for f in files if f.parent.name.replace("date=", "") in date_strs]
+        print(f"Loading {len(files)} curated partitions (with 60-day context window)...")
+    else:
+        print(f"Loading {len(files)} curated partitions (full)...")
+    
+    if not files:
+        return pd.DataFrame()
+    
     df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values(['symbol', 'date']).reset_index(drop=True)
@@ -215,13 +370,40 @@ def main():
     print("Feature Engineering Service (Level 1)")
     print("=" * 60)
     
-    # Load curated data
-    df = load_curated_data()
+    # Determine which dates to process
+    print("\nStep 1: Determining dates to process...")
+    dates_to_process, is_full_rebuild = determine_dates_to_process()
+    
+    if not dates_to_process:
+        print("\n" + "=" * 60)
+        print("Features Already Up-to-Date - No Action Needed")
+        print("=" * 60)
+        return
+    
+    mode = "full rebuild" if is_full_rebuild else "incremental update"
+    print(f"\nMode: {mode}")
+    print(f"Processing {len(dates_to_process)} dates")
+    
+    # Load curated data (with context for rolling windows)
+    print("\nStep 2: Loading curated data...")
+    if not is_full_rebuild:
+        df = load_curated_data(date_filter=dates_to_process)
+    else:
+        df = load_curated_data()
     
     # Build features
+    print("\nStep 3: Computing features...")
     df = build_features(df)
     
+    # Filter to only dates we're processing
+    if not is_full_rebuild:
+        df['date'] = pd.to_datetime(df['date'])
+        filter_dates = pd.to_datetime([d for d in dates_to_process])
+        df = df[df['date'].isin(filter_dates)]
+        print(f"Filtered to {len(df)} rows for target dates")
+    
     # Write partitioned output
+    print("\nStep 4: Writing features...")
     write_partitions(df)
     
     print("\nFeature engineering complete.")

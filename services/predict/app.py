@@ -1,7 +1,7 @@
 """
 Prediction Service
 
-loads production model from mlflow and makes daily volatility predictions
+loads production model and makes daily volatility predictions
 predicts next-day volatility using latest available features
 """
 
@@ -10,15 +10,16 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import datetime, timedelta
-import mlflow
-import mlflow.sklearn
+
+# Local experiment tracker
+from experiment_tracker import experiment_run
 
 
 #configuration
 DATA_FEATURES = Path("data/features.L1")
 DATA_PREDICTIONS = Path("data/predictions")
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
-MODEL_NAME = "volatility-forecaster-ensemble"
+EXPERIMENTS_DIR = Path("models/experiments")
+EXPERIMENT_NAME = "predictions"
 
 
 def get_existing_dates(data_dir: Path) -> list:
@@ -156,29 +157,27 @@ def save_prediction(prediction, prediction_date, features_date, model_path):
     return outpath
 
 
-def log_to_mlflow(prediction, prediction_date, features_date, model_path):
+def log_prediction(prediction, prediction_date, features_date, model_path):
     """
-    log prediction to mlflow for tracking
+    log prediction using simple JSON tracker
     """
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    mlflow.set_experiment("volatility-forecasting-predictions")
+    EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
     
-    with mlflow.start_run(run_name=f"prediction-{prediction_date}"):
-        #log prediction metadata
-        mlflow.log_params({
+    with experiment_run(EXPERIMENT_NAME, run_name=f"prediction-{prediction_date}") as tracker:
+        # Log prediction metadata
+        tracker.log_params({
             'prediction_date': str(prediction_date),
             'features_date': str(features_date),
             'model_path': str(model_path),
             'prediction_timestamp': datetime.now().isoformat()
         })
         
-        #log prediction value
-        mlflow.log_metrics({
-            'predicted_volatility': prediction
+        # Log prediction value
+        tracker.log_metrics({
+            'predicted_volatility': float(prediction)
         })
         
-        run_id = mlflow.active_run().info.run_id
-        print(f"logged to mlflow run: {run_id}")
+        print(f"✅ Prediction logged to {EXPERIMENTS_DIR}")
 
 
 def main():
@@ -207,14 +206,13 @@ def main():
     print("\nsaving prediction...")
     save_prediction(prediction, prediction_date, features_date, model_path)
     
-    #log to mlflow
-    print("\nlogging to mlflow...")
-    log_to_mlflow(prediction, prediction_date, features_date, model_path)
+    #log prediction
+    print("\nlogging prediction...")
+    log_prediction(prediction, prediction_date, features_date, model_path)
     
     print("\n" + "="*60)
     print("Prediction Complete")
     print("="*60)
-
 
 if __name__ == "__main__":
     main()

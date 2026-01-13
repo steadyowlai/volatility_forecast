@@ -24,18 +24,18 @@ import xgboost as xgb
 import lightgbm as lgb
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-import mlflow
-import mlflow.sklearn
+
+# Local experiment tracker
+from experiment_tracker import experiment_run
 
 #config
 MASTER_DATASET = Path("data/master_dataset.parquet")
 OUTPUT_DIR = Path("data/predictions")
 MODELS_DIR = Path("models")
+EXPERIMENTS_DIR = MODELS_DIR / "experiments"
 MODEL_CONFIG = Path("final_model/model_config.json")
 BENCHMARK_CONFIG = Path("final_model/benchmark_results.json")
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
-EXPERIMENT_NAME = "volatility-forecasting"
-MODEL_NAME = "volatility-forecaster-ensemble"
+EXPERIMENT_NAME = "training"
 
 
 def load_master_dataset():
@@ -366,25 +366,49 @@ def save_baselines(model_a_metrics, model_b_metrics, split_info_a, split_info_b=
     print(f"appended training record {training_history_path}")
 
 
-def log_to_mlflow(models, feature_cols, train_metrics, val_metrics, config, benchmarks, split_info):
-    """log model A to mlflow"""
+def log_training_experiment(models, feature_cols, train_metrics, val_metrics, config, benchmarks, split_info):
+    """Log training experiment using simple JSON tracker"""
     print("\n" + "="*60)
-    print("logging to mlflow")
+    print("logging training experiment")
     print("="*60)
     
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(EXPERIMENT_NAME)
+    # Ensure experiments directory exists
+    EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
     
-    with mlflow.start_run(run_name=f"ensemble-{datetime.now().strftime('%Y%m%d-%H%M%S')}"):
-        #log params
-        mlflow.log_param('model_architecture', config['model_architecture'])
-        mlflow.log_param('n_base_models', len(config['base_models']))
-        mlflow.log_param('n_features', len(feature_cols))
-        mlflow.log_param('n_train_samples', split_info['train_samples'])
-        mlflow.log_param('n_val_samples', split_info['val_samples'])
+    with experiment_run(EXPERIMENT_NAME, run_name="dual-model-training") as tracker:
+        # Log model architecture params
+        tracker.log_params({
+            'model_architecture': config.get('model_architecture', 'stacking_ensemble'),
+            'n_base_models': len(config.get('base_models', [])),
+            'n_features': len(feature_cols),
+            'n_train_samples': split_info['train_samples'],
+            'n_val_samples': split_info['val_samples']
+        })
         
-        #log metrics
-        mlflow.log_metrics({
+        # Log date ranges
+        tracker.log_params({
+            'train_start_date': split_info['train_start_date'],
+            'train_end_date': split_info['train_end_date'],
+            'val_start_date': split_info['val_start_date'],
+            'val_end_date': split_info['val_end_date']
+        })
+        
+        # Log hyperparameters
+        for base_model in config.get('base_models', []):
+            if isinstance(base_model, dict):
+                model_name = base_model.get('name', 'unknown')
+                model_params = base_model.get('params', {})
+                for param_name, param_value in model_params.items():
+                    tracker.log_param(f'{model_name}_{param_name}', param_value)
+        
+        # Log meta-learner params
+        if 'meta_learner' in config:
+            meta_params = config['meta_learner'].get('params', {})
+            for param_name, param_value in meta_params.items():
+                tracker.log_param(f'meta_{param_name}', param_value)
+        
+        # Log training metrics
+        tracker.log_metrics({
             'train_rmse': train_metrics['rmse'],
             'train_mae': train_metrics['mae'],
             'train_r2': train_metrics['r2'],
@@ -393,50 +417,31 @@ def log_to_mlflow(models, feature_cols, train_metrics, val_metrics, config, benc
             'val_r2': val_metrics['r2']
         })
         
-        #log date ranges
-        mlflow.log_param('train_start_date', split_info['train_start_date'])
-        mlflow.log_param('train_end_date', split_info['train_end_date'])
-        mlflow.log_param('val_start_date', split_info['val_start_date'])
-        mlflow.log_param('val_end_date', split_info['val_end_date'])
-        
-        #benchmark comparison
+        # Benchmark comparison
         if benchmarks:
-            expected_rmse = benchmarks['expected_performance']['val_rmse']
-            actual_rmse = val_metrics['rmse']
-            diff = actual_rmse - expected_rmse
-            diff_pct = (diff / expected_rmse) * 100
-            
-            mlflow.log_metrics({
-                'expected_val_rmse': expected_rmse,
-                'rmse_diff': diff,
-                'rmse_diff_pct': diff_pct
-            })
-            
-            print(f"\nbenchmark comparison")
-            print(f"expected {expected_rmse:.6f} actual {actual_rmse:.6f} diff {diff:+.6f} ({diff_pct:+.2f}%)")
+            expected_rmse = benchmarks.get('expected_performance', {}).get('val_rmse')
+            if expected_rmse:
+                actual_rmse = val_metrics['rmse']
+                diff = actual_rmse - expected_rmse
+                diff_pct = (diff / expected_rmse) * 100
+                
+                tracker.log_metrics({
+                    'expected_val_rmse': expected_rmse,
+                    'rmse_diff': diff,
+                    'rmse_diff_pct': diff_pct
+                })
+                
+                print(f"\nbenchmark comparison")
+                print(f"expected {expected_rmse:.6f} actual {actual_rmse:.6f} diff {diff:+.6f} ({diff_pct:+.2f}%)")
         
-        #log model
-        ensemble_artifact = {
-            'xgb_model': models['xgb_model'],
-            'lgbm_model': models['lgbm_model'],
-            'meta_model': models['meta_model'],
-            'feature_cols': feature_cols
-        }
-        
-        mlflow.sklearn.log_model(
-            ensemble_artifact,
-            "ensemble",
-            registered_model_name=MODEL_NAME
-        )
-        
-        #log config files
-        mlflow.log_artifact(MODEL_CONFIG)
+        # Log artifact paths
+        tracker.log_artifact(str(MODELS_DIR / "model_90pct.pkl"), "Model A (90% split)")
+        tracker.log_artifact(str(MODEL_CONFIG), "Model configuration")
         if BENCHMARK_CONFIG.exists():
-            mlflow.log_artifact(BENCHMARK_CONFIG)
+            tracker.log_artifact(str(BENCHMARK_CONFIG), "Benchmark results")
         
-        run_id = mlflow.active_run().info.run_id
-        print(f"\nmlflow run_id {run_id}")
-        print(f"model registered as {MODEL_NAME}")
+        print(f"\n✅ Experiment logged to {EXPERIMENTS_DIR}")
+        print("✅ Training complete")
 
 
 def main():
@@ -477,8 +482,8 @@ def main():
     #save predictions
     save_predictions(train_df, val_df, model_a['train_pred'], model_a['val_pred'])
     
-    #log to mlflow
-    log_to_mlflow(
+    #log training experiment
+    log_training_experiment(
         model_a, feature_cols,
         model_a['train_metrics'], model_a['val_metrics'],
         config, benchmarks, split_info

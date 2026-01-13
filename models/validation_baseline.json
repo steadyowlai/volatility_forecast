@@ -1,8 +1,8 @@
 {
-  "validation_rmse": 0.011443180557597106,
-  "validation_mae": 0.006813530778214524,
-  "validation_r2": 0.43020905254851605,
-  "timestamp": "2026-01-08T22:12:05.350257",
+  "validation_rmse": 0.011420318170957806,
+  "validation_mae": 0.00679379430694189,
+  "validation_r2": 0.4324846183385629,
+  "timestamp": "2026-01-13T23:24:33.475188",
   "train_val_split": 0.9,
   "date_range": {
     "train_start": "2010-03-31",

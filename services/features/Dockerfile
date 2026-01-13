@@ -6,8 +6,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 WORKDIR /app
 
-# copy libs and service code
-COPY libs/ ./libs/
+# copy service code (self-contained with schemas.py, data_status.py)
 COPY services/features/ ./services/features/
 COPY config/ ./config/
 

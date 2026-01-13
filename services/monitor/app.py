@@ -15,8 +15,6 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-import mlflow
-import mlflow.sklearn
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 
@@ -26,7 +24,6 @@ DATA_FEATURES = Path("data/features.L1")
 MASTER_DATASET = Path("data/master_dataset.parquet")
 MODELS_DIR = Path("models")
 MONITORING_HISTORY = MODELS_DIR / "monitoring_history.jsonl"
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 
 
 def load_validation_baseline():

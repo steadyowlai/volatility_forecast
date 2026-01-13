@@ -13,11 +13,11 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 WORKDIR /app
 
 # ---- Copy project code (relative to build context = repo root) ----
-COPY libs/ ./libs/
+# Note: Service is now self-contained with local modules (schemas.py, data_status.py)
 COPY services/ingest/ ./services/ingest/
 COPY config/ ./config/
 
-# ---- Set PYTHONPATH so Python can find the libs module ----
+# ---- Set PYTHONPATH so Python can find service modules ----
 ENV PYTHONPATH=/app
 
 # ---- Default command ----

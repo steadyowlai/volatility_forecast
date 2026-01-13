@@ -56,22 +56,6 @@ services:
       - ./data:/app/data
     command: ["pytest", "tests/", "-v", "--cov=services", "--cov=libs", "--cov-report=term-missing"]
 
-  # MLflow Service: tracking server for model registry and experiment tracking
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.9.2
-    container_name: vf-mlflow
-    ports:
-      - "5001:5000"
-    volumes:
-      - ./mlruns:/mlflow/mlruns
-      - ./data:/mlflow/data
-    command: >
-      mlflow server 
-      --backend-store-uri sqlite:///mlflow/mlruns/mlflow.db
-      --default-artifact-root /mlflow/mlruns/artifacts
-      --host 0.0.0.0
-      --port 5000
-
   # Dataset Preparation Service: creates and maintains master dataset
   # Runs daily after features to create data/master_dataset.parquet
   # This ensures consistency between training and monitoring
@@ -89,7 +73,7 @@ services:
     command: ["python", "app.py"]
 
   # Training Service: trains model with best hyperparameters from tuning
-  # Reads from data/master_dataset.parquet, saves model to MLflow
+  # Reads from data/master_dataset.parquet, saves model to models/ directory
   train:
     build:
       context: .
@@ -99,19 +83,16 @@ services:
     depends_on:
       - base
       - prepare_dataset
-      - mlflow
-    environment:
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
     volumes:
       - ./data:/app/data
-      - ./mlruns:/app/mlruns
       - ./config:/app/config
       - ./final_model:/app/final_model
       - ./models:/app/models
+      - ./libs:/app/libs
     command: ["python", "services/train/app.py"]
 
   # Prediction Service: generates daily volatility forecasts
-  # Loads model from MLflow, reads latest features, predicts next-day volatility
+  # Loads model from models/ directory, reads latest features, predicts next-day volatility
   predict:
     build:
       context: .
@@ -122,12 +103,8 @@ services:
       - base
       - features
       - train
-      - mlflow
-    environment:
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
     volumes:
       - ./data:/app/data
-      - ./mlruns:/app/mlruns
       - ./models:/app/models
     command: ["python", "app.py"]
 
@@ -143,12 +120,8 @@ services:
     depends_on:
       - base
       - predict
-      - mlflow
-    environment:
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
     volumes:
       - ./data:/app/data
-      - ./mlruns:/app/mlruns
       - ./models:/app/models
     command: ["python", "app.py"]
 

@@ -1,0 +1,65 @@
+{
+  "experiment_name": "training",
+  "run_id": "20260113_232247",
+  "start_time": "2026-01-13T23:22:47.126805",
+  "params": {
+    "model_architecture": "stacking_ensemble",
+    "n_base_models": 2,
+    "n_features": 20,
+    "n_train_samples": 3570,
+    "n_val_samples": 397,
+    "train_start_date": "2010-03-31",
+    "train_end_date": "2024-06-05",
+    "val_start_date": "2024-06-06",
+    "val_end_date": "2026-01-06",
+    "xgboost_max_depth": 3,
+    "xgboost_learning_rate": 0.01,
+    "xgboost_n_estimators": 564,
+    "xgboost_subsample": 0.7,
+    "xgboost_colsample_bytree": 0.7,
+    "xgboost_reg_alpha": 0,
+    "xgboost_reg_lambda": 5,
+    "xgboost_random_state": 42,
+    "xgboost_n_jobs": -1,
+    "lightgbm_max_depth": 5,
+    "lightgbm_learning_rate": 0.005,
+    "lightgbm_n_estimators": 525,
+    "lightgbm_num_leaves": 21,
+    "lightgbm_min_child_samples": 20,
+    "lightgbm_subsample": 0.7,
+    "lightgbm_colsample_bytree": 0.7,
+    "lightgbm_reg_alpha": 0,
+    "lightgbm_reg_lambda": 2,
+    "lightgbm_random_state": 42,
+    "lightgbm_n_jobs": -1,
+    "lightgbm_verbose": -1,
+    "meta_alpha": 0.001,
+    "meta_random_state": 42
+  },
+  "metrics": {
+    "train_rmse": 0.007157343987224362,
+    "train_mae": 0.004992883357265972,
+    "train_r2": 0.7564965167625062,
+    "val_rmse": 0.011395303947773487,
+    "val_mae": 0.006765292661852194,
+    "val_r2": 0.4355197957506963,
+    "expected_val_rmse": 0.011283515990667684,
+    "rmse_diff": 0.00011178795710580294,
+    "rmse_diff_pct": 0.9907191800699355
+  },
+  "artifacts": [
+    {
+      "path": "models/model_90pct.pkl",
+      "description": "Model A (90% split)"
+    },
+    {
+      "path": "final_model/model_config.json",
+      "description": "Model configuration"
+    },
+    {
+      "path": "final_model/benchmark_results.json",
+      "description": "Benchmark results"
+    }
+  ],
+  "end_time": "2026-01-13T23:22:47.128224"
+}
