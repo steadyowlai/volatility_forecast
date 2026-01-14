@@ -17,67 +17,66 @@ from pathlib import Path
 from datetime import datetime
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
+# Storage abstraction layer
+from storage import Storage
+
+# Initialize storage
+storage = Storage()
 
 #config
-DATA_CURATED = Path("data/curated.market")
-DATA_FEATURES = Path("data/features.L1")
-MASTER_DATASET = Path("data/master_dataset.parquet")
-MODELS_DIR = Path("models")
-MONITORING_HISTORY = MODELS_DIR / "monitoring_history.jsonl"
+DATA_CURATED = "data/curated.market"
+DATA_FEATURES = "data/features.L1"
+MASTER_DATASET = "data/master_dataset.parquet"
+MODELS_DIR = "models"
+MONITORING_HISTORY = "models/monitoring_history.jsonl"
 
 
 def load_validation_baseline():
     """load validation baseline from training service"""
-    baseline_path = MODELS_DIR / "validation_baseline.json"
-    if not baseline_path.exists():
+    baseline_path = f"{MODELS_DIR}/validation_baseline.json"
+    if not storage.exists(baseline_path):
         raise FileNotFoundError(
             f"Validation baseline not found at {baseline_path}. "
             f"Run training service first to generate baseline."
         )
     
-    with open(baseline_path) as f:
-        baseline = json.load(f)
-    
+    baseline = storage.read_json(baseline_path)
     return baseline
 
 
 def load_dual_model_baseline():
     """load dual model baseline with both model A and model B info"""
-    baseline_path = MODELS_DIR / "dual_model_baseline.json"
-    if not baseline_path.exists():
+    baseline_path = f"{MODELS_DIR}/dual_model_baseline.json"
+    if not storage.exists(baseline_path):
         raise FileNotFoundError(
             f"Dual model baseline not found at {baseline_path}. "
             f"Run training service first to generate baseline."
         )
     
-    with open(baseline_path) as f:
-        baseline = json.load(f)
-    
+    baseline = storage.read_json(baseline_path)
     return baseline
 
 
 def load_trained_model(model_name="latest_ensemble"):
     """load trained ensemble model"""
-    model_path = MODELS_DIR / f"{model_name}.pkl"
-    if not model_path.exists():
+    model_path = f"{MODELS_DIR}/{model_name}.pkl"
+    if not storage.exists(model_path):
         raise FileNotFoundError(f"Trained model not found at {model_path}")
     
-    with open(model_path, 'rb') as f:
-        model_artifact = pickle.load(f)
-    
+    model_artifact = storage.read_pickle(model_path)
     return model_artifact
 
 
 def load_master_dataset():
     """load master dataset from prepare_dataset service"""
-    if not MASTER_DATASET.exists():
+    if not storage.exists(MASTER_DATASET):
         raise FileNotFoundError(
             f"Master dataset not found at {MASTER_DATASET}. "
             f"Run prepare_dataset service first: docker-compose up prepare_dataset"
         )
     
     print(f"loading master dataset from {MASTER_DATASET}")
-    df = pd.read_parquet(MASTER_DATASET)
+    df = storage.read_parquet(MASTER_DATASET)
     df['date'] = pd.to_datetime(df['date'])
     
     print(f"loaded {len(df)} samples from {df['date'].min().date()} to {df['date'].max().date()}")
@@ -87,7 +86,6 @@ def load_master_dataset():
 
 def save_monitoring_record(dual_baseline, comparisons, drift_pct_model_a, recommendation, test_window_info):
     """save monitoring results to jsonl history file"""
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
     
     record = {
         'timestamp': datetime.now().isoformat(),
@@ -138,22 +136,22 @@ def save_monitoring_record(dual_baseline, comparisons, drift_pct_model_a, recomm
     }
     
     #append to jsonl file
-    with open(MONITORING_HISTORY, 'a') as f:
-        f.write(json.dumps(record) + '\n')
-    
+    storage.append_jsonl(record, MONITORING_HISTORY)
     print(f"saved monitoring record {MONITORING_HISTORY}")
 
 
 def load_monitoring_history():
     """load historical monitoring records"""
-    if not MONITORING_HISTORY.exists():
+    if not storage.exists(MONITORING_HISTORY):
         return []
     
+    # Read the entire file content
+    content = storage.read_text(MONITORING_HISTORY)
+    
     records = []
-    with open(MONITORING_HISTORY, 'r') as f:
-        for line in f:
-            if line.strip():
-                records.append(json.loads(line))
+    for line in content.strip().split('\n'):
+        if line.strip():
+            records.append(json.loads(line))
     
     return records
 

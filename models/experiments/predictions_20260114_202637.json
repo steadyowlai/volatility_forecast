@@ -1,0 +1,16 @@
+{
+  "experiment_name": "predictions",
+  "run_id": "20260114_202637",
+  "start_time": "2026-01-14T20:26:37.824341",
+  "params": {
+    "prediction_date": "2026-01-14",
+    "features_date": "2026-01-13",
+    "model_path": "models/latest_ensemble.pkl",
+    "prediction_timestamp": "2026-01-14T20:26:37.824350"
+  },
+  "metrics": {
+    "predicted_volatility": 0.013648151712041135
+  },
+  "artifacts": [],
+  "end_time": "2026-01-14T20:26:37.824373"
+}

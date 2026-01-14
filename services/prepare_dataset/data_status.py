@@ -12,16 +12,18 @@ This JSON is just a performance optimization to avoid reading the parquet file.
 """
 
 import json
-from pathlib import Path
 from datetime import datetime
 from typing import Optional
+from storage import Storage
 
+# Initialize storage
+storage = Storage()
 
 # Default status file location
-DEFAULT_STATUS_PATH = Path("data/data_status.json")
+DEFAULT_STATUS_PATH = "data/data_status.json"
 
 
-def get_status(status_path: Path = DEFAULT_STATUS_PATH) -> dict:
+def get_status(status_path: str = DEFAULT_STATUS_PATH) -> dict:
     """
     Read the current data status.
     
@@ -33,19 +35,18 @@ def get_status(status_path: Path = DEFAULT_STATUS_PATH) -> dict:
     
     Returns empty dict if file doesn't exist.
     """
-    if not status_path.exists():
+    if not storage.exists(status_path):
         return {}
     
     try:
-        with open(status_path, 'r') as f:
-            return json.load(f)
+        return storage.read_json(status_path)
     except Exception as e:
         print(f"warning: could not read data_status.json: {e}")
         return {}
 
 
 def update_status(
-    status_path: Path = DEFAULT_STATUS_PATH,
+    status_path: str = DEFAULT_STATUS_PATH,
     last_date: Optional[str] = None,
     rows: Optional[int] = None,
 ) -> None:
@@ -73,12 +74,10 @@ def update_status(
     status['updated_at'] = datetime.utcnow().isoformat() + 'Z'
     
     # Write back to file
-    status_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(status_path, 'w') as f:
-        json.dump(status, f, indent=2)
+    storage.write_json(status, status_path)
 
 
-def get_last_date(status_path: Path = DEFAULT_STATUS_PATH) -> Optional[str]:
+def get_last_date(status_path: str = DEFAULT_STATUS_PATH) -> Optional[str]:
     """
     Get the last date in master_dataset from status file.
     

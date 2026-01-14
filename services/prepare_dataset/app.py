@@ -22,38 +22,47 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 from data_status import update_status
+from storage import Storage
 
+
+# Initialize storage
+storage = Storage()
 
 # Configuration
-DATA_CURATED = Path("data/curated.market")
-DATA_FEATURES = Path("data/features.L1")
-OUTPUT_PATH = Path("data/master_dataset.parquet")
+DATA_CURATED = "data/curated.market"
+DATA_FEATURES = "data/features.L1"
+OUTPUT_PATH = "data/master_dataset.parquet"
 
 
 def get_available_feature_dates():
     """Get all dates that have features computed."""
-    features_path = DATA_FEATURES
-    files = list(features_path.glob("date=*/features.parquet"))
+    # List all feature files - only once
+    print("  scanning feature partitions...")
+    files = storage.list_files(f"{DATA_FEATURES}/")
     
-    dates = []
+    dates = set()  # Use set for faster lookups
     for f in files:
-        date_str = f.parent.name.replace("date=", "")
-        try:
-            dates.append(pd.to_datetime(date_str).date())
-        except:
-            pass
+        if 'features.parquet' in f:
+            # Extract date from path like "data/features.L1/date=2024-01-01/features.parquet"
+            try:
+                # Fast extraction: split and find date= part
+                date_str = f.split('/date=')[1].split('/')[0]
+                dates.add(pd.to_datetime(date_str).date())
+            except:
+                pass
     
     return sorted(dates)
 
 
 def get_existing_master_dates():
     """Get dates already present in master_dataset.parquet."""
-    if not OUTPUT_PATH.exists():
+    if not storage.exists(OUTPUT_PATH):
         return []
     
     try:
-        df = pd.read_parquet(OUTPUT_PATH, columns=['date'])
+        df = storage.read_parquet(OUTPUT_PATH)
         df['date'] = pd.to_datetime(df['date'])
+        # Only read date column for efficiency
         return sorted(df['date'].dt.date.unique())
     except Exception as e:
         print(f"warning: could not read existing master_dataset: {e}")
@@ -65,26 +74,50 @@ def determine_dates_to_process():
     Determine which dates need to be added to master dataset.
     
     Strategy:
-    - Only process dates AFTER the last date in master_dataset
-    - Ignore older dates with features but not in master (were filtered due to NaN)
+    - Check data_status.json for last processed date (O(1) - just read JSON)
+    - Check if next sequential dates exist by testing file existence (O(n) where n = new dates)
+    - No need to list 4000+ files!
     
     Returns:
         tuple: (dates_to_process, is_full_rebuild)
         - dates_to_process: list of dates to add
         - is_full_rebuild: True if building from scratch, False if incremental
     """
-    available_dates = get_available_feature_dates()
-    existing_dates = get_existing_master_dates()
+    from data_status import get_status
+    from datetime import timedelta
     
-    if not existing_dates:
+    # Check data_status.json first (fast - just read JSON)
+    status = get_status()
+    
+    if not status or 'last_date' not in status:
         print("no existing master_dataset found - will build from scratch")
+        # Only for full rebuild do we need to scan all files
+        available_dates = get_available_feature_dates()
         return available_dates, True
     
-    # Get last date in master dataset
-    last_master_date = max(existing_dates)
+    # We know the last date - just check if next dates exist!
+    last_date = pd.to_datetime(status['last_date']).date()
+    print(f"last processed date: {last_date}")
     
-    # Only process dates AFTER last master date (incremental)
-    new_dates = [d for d in available_dates if d > last_master_date]
+    # Check for new dates by testing existence of sequential date folders
+    # This is O(n) where n = number of new dates (usually 1-10)
+    # Instead of O(4000+) listing all files!
+    print("  checking for new feature dates...")
+    new_dates = []
+    check_date = last_date + timedelta(days=1)
+    max_gap = 30  # Stop after 30 consecutive missing dates (reasonable gap for trading days)
+    consecutive_missing = 0
+    
+    while consecutive_missing < max_gap:
+        # Check if this date has features computed
+        feature_path = f"{DATA_FEATURES}/date={check_date}/features.parquet"
+        if storage.exists(feature_path):
+            new_dates.append(check_date)
+            consecutive_missing = 0  # Reset counter
+        else:
+            consecutive_missing += 1
+        
+        check_date += timedelta(days=1)
     
     if not new_dates:
         print("master_dataset is up to date - no new dates to process")
@@ -96,36 +129,34 @@ def determine_dates_to_process():
     return new_dates, False
 
 
-def load_curated_data(date_filter=None, start_date=None):
+def load_curated_data(date_filter=None, start_date=None, file_list=None):
     """
     Load curated market data, optionally filtered by dates or from a start date.
     
     Args:
         date_filter: list of specific dates to load (None = load all)
         start_date: load all dates >= this date (None = load all)
+        file_list: pre-fetched list of files (optimization to avoid re-listing)
     """
-    curated_path = DATA_CURATED
-    files = list(curated_path.glob("date=*/daily.parquet"))
+    # Get all curated files (use cached list if provided)
+    if file_list is None:
+        print("  scanning curated partitions...")
+        all_files = storage.list_files(f"{DATA_CURATED}/")
+        files = [f for f in all_files if 'daily.parquet' in f]
+    else:
+        files = [f for f in file_list if 'daily.parquet' in f]
     
     if not files:
-        raise FileNotFoundError(f"No curated data found in {curated_path}")
+        raise FileNotFoundError(f"No curated data found in {DATA_CURATED}")
     
     # Filter files by date if specified
     if date_filter:
         date_strs = {d.strftime("%Y-%m-%d") for d in date_filter}
-        files = [f for f in files if f.parent.name.replace("date=", "") in date_strs]
+        files = [f for f in files if f.split('/date=')[1].split('/')[0] in date_strs]
         print(f"loading {len(files)} curated partitions for specific dates...")
     elif start_date:
-        filtered_files = []
-        for f in files:
-            date_str = f.parent.name.replace("date=", "")
-            try:
-                file_date = pd.to_datetime(date_str).date()
-                if file_date >= start_date:
-                    filtered_files.append(f)
-            except:
-                pass
-        files = filtered_files
+        start_str = start_date.strftime("%Y-%m-%d")
+        files = [f for f in files if f.split('/date=')[1].split('/')[0] >= start_str]
         print(f"loading {len(files)} curated partitions from {start_date} onwards...")
     else:
         print(f"loading {len(files)} curated partitions (full)...")
@@ -137,9 +168,12 @@ def load_curated_data(date_filter=None, start_date=None):
     skipped = 0
     for f in files:
         try:
-            dfs.append(pd.read_parquet(f))
+            dfs.append(storage.read_parquet(f))
         except Exception as e:
-            print(f"warning: skipping corrupted file {f.parent.name}/{f.name}: {str(e)[:50]}")
+            # Extract just the date folder for cleaner error message
+            date_folder = [p for p in f.split('/') if p.startswith('date=')]
+            date_folder = date_folder[0] if date_folder else f
+            print(f"warning: skipping corrupted file {date_folder}: {str(e)[:50]}")
             skipped += 1
     
     if skipped > 0:
@@ -200,16 +234,26 @@ def load_features(date_filter=None):
     Args:
         date_filter: list of dates to load (None = load all)
     """
-    features_path = DATA_FEATURES
-    files = list(features_path.glob("date=*/features.parquet"))
+    # Get all feature files
+    all_files = storage.list_files(f"{DATA_FEATURES}/")
+    files = [f for f in all_files if 'features.parquet' in f]
     
     if not files:
-        raise FileNotFoundError(f"No features found in {features_path}")
+        raise FileNotFoundError(f"No features found in {DATA_FEATURES}")
     
     # Filter files by date if specified
     if date_filter:
         date_strs = {d.strftime("%Y-%m-%d") for d in date_filter}
-        files = [f for f in files if f.parent.name.replace("date=", "") in date_strs]
+        filtered = []
+        for f in files:
+            # Extract date from path like "data/features.L1/date=2024-01-01/features.parquet"
+            parts = f.split('/')
+            for part in parts:
+                if part.startswith('date='):
+                    if part.replace("date=", "") in date_strs:
+                        filtered.append(f)
+                    break
+        files = filtered
         print(f"loading {len(files)} feature partitions for new dates...")
     else:
         print(f"loading {len(files)} feature partitions (full)...")
@@ -221,9 +265,12 @@ def load_features(date_filter=None):
     skipped = 0
     for f in files:
         try:
-            dfs.append(pd.read_parquet(f))
+            dfs.append(storage.read_parquet(f))
         except Exception as e:
-            print(f"warning: skipping corrupted file {f.parent.name}/{f.name}: {str(e)[:50]}")
+            # Extract just the date folder for cleaner error message
+            date_folder = [p for p in f.split('/') if p.startswith('date=')]
+            date_folder = date_folder[0] if date_folder else f
+            print(f"warning: skipping corrupted file {date_folder}: {str(e)[:50]}")
             skipped += 1
     
     if skipped > 0:
@@ -318,9 +365,9 @@ def prepare_dataset():
     
     # Load existing master dataset and append new data
     print(f"\nStep 7: Updating master dataset...")
-    if not is_full_rebuild and OUTPUT_PATH.exists():
+    if not is_full_rebuild and storage.exists(OUTPUT_PATH):
         print("  loading existing master_dataset...")
-        existing_data = pd.read_parquet(OUTPUT_PATH)
+        existing_data = storage.read_parquet(OUTPUT_PATH)
         existing_data['date'] = pd.to_datetime(existing_data['date'])
         
         print(f"  existing data: {len(existing_data)} rows")
@@ -339,14 +386,9 @@ def prepare_dataset():
     
     # Save master dataset
     print(f"\nStep 8: Saving master dataset...")
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(OUTPUT_PATH, index=False)
-    
-    # Get file size
-    file_size_mb = OUTPUT_PATH.stat().st_size / (1024 * 1024)
+    storage.write_parquet(df, OUTPUT_PATH)
     
     print(f"  saved to: {OUTPUT_PATH}")
-    print(f"  file size: {file_size_mb:.2f} MB")
     print(f"  rows: {len(df)}")
     print(f"  columns: {len(df.columns)}")
     print(f"  features: {len([c for c in df.columns if c not in ['date', 'rv_5d']])}")

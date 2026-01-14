@@ -1,24 +1,24 @@
 {
-  "timestamp": "2026-01-13T23:24:33.485414",
+  "timestamp": "2026-01-14T20:21:52.603999",
   "model_a": {
-    "training_samples": 3566,
+    "training_samples": 3568,
     "training_date_start": "2010-03-31",
-    "training_date_end": "2024-05-31",
-    "validation_rmse": 0.011420318170957806,
-    "validation_mae": 0.00679379430694189,
-    "validation_r2": 0.4324846183385629,
+    "training_date_end": "2024-06-04",
+    "validation_rmse": 0.011392188148672452,
+    "validation_mae": 0.006754071795702484,
+    "validation_r2": 0.4357415256818221,
     "validation_samples": 397
   },
   "model_b": {
-    "training_samples": 3933,
+    "training_samples": 3935,
     "training_date_start": "2010-03-31",
-    "training_date_end": "2025-11-17",
+    "training_date_end": "2025-11-20",
     "test_samples": 30,
-    "test_date_start": "2025-11-18",
-    "test_date_end": "2025-12-31",
-    "test_rmse": 0.0057901187443858216,
-    "test_mae": 0.004774268055480295,
-    "test_r2": -0.1198077391208916,
+    "test_date_start": "2025-11-21",
+    "test_date_end": "2026-01-06",
+    "test_rmse": 0.005482708093793949,
+    "test_mae": 0.00451368340715333,
+    "test_r2": -0.9569373187760415,
     "note": "model B held out last 30 samples for testing"
   }
 }

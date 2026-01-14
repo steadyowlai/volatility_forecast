@@ -28,26 +28,32 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 # Local experiment tracker
 from experiment_tracker import experiment_run
 
+# Storage abstraction layer
+from storage import Storage
+
+# Initialize storage
+storage = Storage()
+
 #config
-MASTER_DATASET = Path("data/master_dataset.parquet")
-OUTPUT_DIR = Path("data/predictions")
-MODELS_DIR = Path("models")
-EXPERIMENTS_DIR = MODELS_DIR / "experiments"
-MODEL_CONFIG = Path("final_model/model_config.json")
-BENCHMARK_CONFIG = Path("final_model/benchmark_results.json")
+MASTER_DATASET = "data/master_dataset.parquet"
+OUTPUT_DIR = "data/predictions"
+MODELS_DIR = "models"
+EXPERIMENTS_DIR = "models/experiments"
+MODEL_CONFIG = "final_model/model_config.json"
+BENCHMARK_CONFIG = "final_model/benchmark_results.json"
 EXPERIMENT_NAME = "training"
 
 
 def load_master_dataset():
     """load master dataset from prepare_dataset service"""
-    if not MASTER_DATASET.exists():
+    if not storage.exists(MASTER_DATASET):
         raise FileNotFoundError(
             f"master dataset not found at {MASTER_DATASET}. "
             f"run prepare_dataset service first: docker-compose up prepare_dataset"
         )
     
     print(f"loading master dataset from {MASTER_DATASET}")
-    df = pd.read_parquet(MASTER_DATASET)
+    df = storage.read_parquet(MASTER_DATASET)
     df['date'] = pd.to_datetime(df['date'])
     
     print(f"loaded {len(df)} samples")
@@ -59,15 +65,14 @@ def load_master_dataset():
 
 def load_model_config():
     """load model config from final_model/model_config.json"""
-    if not MODEL_CONFIG.exists():
+    if not storage.exists(MODEL_CONFIG):
         raise FileNotFoundError(
             f"model config not found at {MODEL_CONFIG}. "
             f"run notebook 2_model_selection.ipynb section 9 to export config"
         )
     
     print(f"\nloading model config from {MODEL_CONFIG}")
-    with open(MODEL_CONFIG) as f:
-        config = json.load(f)
+    config = storage.read_json(MODEL_CONFIG)
     
     print(f"architecture: {config['model_architecture']}")
     print(f"base models: {[m['name'] for m in config['base_models']]}")
@@ -75,9 +80,8 @@ def load_model_config():
     
     #load benchmarks if available
     benchmarks = None
-    if BENCHMARK_CONFIG.exists():
-        with open(BENCHMARK_CONFIG) as f:
-            benchmarks = json.load(f)
+    if storage.exists(BENCHMARK_CONFIG):
+        benchmarks = storage.read_json(BENCHMARK_CONFIG)
         print(f"expected val rmse: {benchmarks['expected_performance']['val_rmse']:.6f}")
     
     return config, benchmarks
@@ -231,7 +235,6 @@ def train_ensemble(X_train, y_train, X_val, y_val, config, model_name="Ensemble"
 
 def save_model(models, feature_cols, filename):
     """save model pkl"""
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
     
     artifact = {
         'xgb_model': models['xgb_model'],
@@ -240,9 +243,8 @@ def save_model(models, feature_cols, filename):
         'feature_cols': feature_cols
     }
     
-    model_path = MODELS_DIR / filename
-    with open(model_path, 'wb') as f:
-        pickle.dump(artifact, f)
+    model_path = f"{MODELS_DIR}/{filename}"
+    storage.write_pickle(artifact, model_path)
     
     print(f"saved {model_path}")
     return model_path
@@ -250,7 +252,6 @@ def save_model(models, feature_cols, filename):
 
 def save_predictions(train_df, val_df, train_preds, val_preds):
     """save predictions parquet"""
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
     train_results = pd.DataFrame({
         'date': train_df['date'],
@@ -267,8 +268,8 @@ def save_predictions(train_df, val_df, train_preds, val_preds):
     })
     
     all_results = pd.concat([train_results, val_results], ignore_index=True)
-    outpath = OUTPUT_DIR / "predictions.parquet"
-    all_results.to_parquet(outpath, index=False)
+    outpath = f"{OUTPUT_DIR}/predictions.parquet"
+    storage.write_parquet(all_results, outpath)
     
     print(f"saved predictions {outpath}")
 
@@ -281,7 +282,6 @@ def save_baselines(model_a_metrics, model_b_metrics, split_info_a, split_info_b=
     1. current baseline json - latest training run for monitor
     2. historical jsonl - append-only history of all runs
     """
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
     
     #validation baseline for model A - current
     validation_baseline = {
@@ -298,9 +298,8 @@ def save_baselines(model_a_metrics, model_b_metrics, split_info_a, split_info_b=
         }
     }
     
-    baseline_path = MODELS_DIR / "validation_baseline.json"
-    with open(baseline_path, 'w') as f:
-        json.dump(validation_baseline, f, indent=2)
+    baseline_path = f"{MODELS_DIR}/validation_baseline.json"
+    storage.write_json(validation_baseline, baseline_path)
     print(f"saved validation baseline {baseline_path}")
     
     #dual model baseline for monitor comparison - current
@@ -344,13 +343,12 @@ def save_baselines(model_a_metrics, model_b_metrics, split_info_a, split_info_b=
             'note': 'model B metrics on val set are insample'
         }
     
-    dual_path = MODELS_DIR / "dual_model_baseline.json"
-    with open(dual_path, 'w') as f:
-        json.dump(dual_baseline, f, indent=2)
+    dual_path = f"{MODELS_DIR}/dual_model_baseline.json"
+    storage.write_json(dual_baseline, dual_path)
     print(f"saved dual baseline {dual_path}")
     
     #historical record (append-only)
-    training_history_path = MODELS_DIR / "training_history.jsonl"
+    training_history_path = f"{MODELS_DIR}/training_history.jsonl"
     
     history_record = {
         'timestamp': datetime.now().isoformat(),
@@ -360,8 +358,7 @@ def save_baselines(model_a_metrics, model_b_metrics, split_info_a, split_info_b=
     }
     
     #append to jsonl
-    with open(training_history_path, 'a') as f:
-        f.write(json.dumps(history_record) + '\n')
+    storage.append_jsonl(history_record, training_history_path)
     
     print(f"appended training record {training_history_path}")
 
@@ -371,9 +368,6 @@ def log_training_experiment(models, feature_cols, train_metrics, val_metrics, co
     print("\n" + "="*60)
     print("logging training experiment")
     print("="*60)
-    
-    # Ensure experiments directory exists
-    EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
     
     with experiment_run(EXPERIMENT_NAME, run_name="dual-model-training") as tracker:
         # Log model architecture params
@@ -435,10 +429,10 @@ def log_training_experiment(models, feature_cols, train_metrics, val_metrics, co
                 print(f"expected {expected_rmse:.6f} actual {actual_rmse:.6f} diff {diff:+.6f} ({diff_pct:+.2f}%)")
         
         # Log artifact paths
-        tracker.log_artifact(str(MODELS_DIR / "model_90pct.pkl"), "Model A (90% split)")
-        tracker.log_artifact(str(MODEL_CONFIG), "Model configuration")
-        if BENCHMARK_CONFIG.exists():
-            tracker.log_artifact(str(BENCHMARK_CONFIG), "Benchmark results")
+        tracker.log_artifact(f"{MODELS_DIR}/model_90pct.pkl", "Model A (90% split)")
+        tracker.log_artifact(MODEL_CONFIG, "Model configuration")
+        if storage.exists(BENCHMARK_CONFIG):
+            tracker.log_artifact(BENCHMARK_CONFIG, "Benchmark results")
         
         print(f"\n✅ Experiment logged to {EXPERIMENTS_DIR}")
         print("✅ Training complete")
