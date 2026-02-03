@@ -2,13 +2,13 @@
   "best_params": {
     "bootstrap": true,
     "max_depth": 5,
-    "max_features": "sqrt",
-    "min_samples_leaf": 1,
-    "min_samples_split": 5,
-    "n_estimators": 100
+    "max_features": "log2",
+    "min_samples_leaf": 2,
+    "min_samples_split": 10,
+    "n_estimators": 300
   },
-  "cv_score": 0.009672344244235204,
-  "timestamp": "2026-01-06T18:02:09.725366",
-  "n_train_samples": 3565,
+  "cv_score": 0.009664185915859345,
+  "timestamp": "2026-01-22T15:50:29.097497",
+  "n_train_samples": 3574,
   "n_features": 20
 }

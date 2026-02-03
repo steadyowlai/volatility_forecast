@@ -1,10 +1,10 @@
 {
   "model_name": "Linear Regression (Ridge)",
   "selected_approach": "Ridge",
-  "timestamp": "2026-01-06T17:57:02.263316",
+  "timestamp": "2026-01-19T16:10:38.762442",
   "data_info": {
-    "n_train": 3565,
-    "n_val": 397,
+    "n_train": 3574,
+    "n_val": 398,
     "n_features": 20
   },
   "hyperparameters": {
@@ -12,148 +12,148 @@
   },
   "metrics": {
     "train": {
-      "rmse": 0.009327248346484948,
-      "mae": 0.005871562267099602,
-      "r2": 0.5868872392652942
+      "rmse": 0.00931633570134938,
+      "mae": 0.005862039503316752,
+      "r2": 0.5871525022171951
     },
     "validation": {
-      "rmse": 0.011575803070797565,
-      "mae": 0.006754028833704403,
-      "r2": 0.4164756929819652
+      "rmse": 0.011577446480144275,
+      "mae": 0.006787329100308573,
+      "r2": 0.41810142419035523
     },
     "generalization": {
-      "train_val_gap_rmse": -0.0022485547243126167,
-      "gap_percentage": 24.10737487396273
+      "train_val_gap_rmse": -0.002261110778794895,
+      "gap_percentage": 24.27038753517003
     }
   },
   "feature_importance": {
     "top_10": [
       {
         "feature": "rv_vix_spread_20d",
-        "coefficient": -0.0016772375372596491
+        "coefficient": -0.0016771272950246734
       },
       {
         "feature": "vix",
-        "coefficient": 0.0016749326610750695
+        "coefficient": 0.001674819003242916
       },
       {
         "feature": "vix_term",
-        "coefficient": -0.0015923721558157332
+        "coefficient": -0.0015897087302519338
       },
       {
         "feature": "spy_vol_5d",
-        "coefficient": 0.001317943638748118
+        "coefficient": 0.0013154275259184597
       },
       {
         "feature": "spy_ret_10d",
-        "coefficient": -0.0012930084726670437
+        "coefficient": -0.0012898947139444864
       },
       {
         "feature": "spy_vol_10d",
-        "coefficient": 0.0012844849897204681
+        "coefficient": 0.001283427579155948
       },
       {
         "feature": "spy_ret_5d",
-        "coefficient": -0.0009366996830389008
+        "coefficient": -0.0009369455521404103
       },
       {
         "feature": "vix3m",
-        "coefficient": 0.0009102254984725058
+        "coefficient": 0.0009113350405251996
       },
       {
         "feature": "spy_vol_20d",
-        "coefficient": 0.0007764275641951451
+        "coefficient": 0.0007755002826521001
       },
       {
         "feature": "drawdown_60d",
-        "coefficient": 0.000739002107601128
+        "coefficient": 0.0007409555298643751
       }
     ],
     "all_features": [
       {
         "feature": "rv_vix_spread_20d",
-        "coefficient": -0.0016772375372596491
+        "coefficient": -0.0016771272950246734
       },
       {
         "feature": "vix",
-        "coefficient": 0.0016749326610750695
+        "coefficient": 0.001674819003242916
       },
       {
         "feature": "vix_term",
-        "coefficient": -0.0015923721558157332
+        "coefficient": -0.0015897087302519338
       },
       {
         "feature": "spy_vol_5d",
-        "coefficient": 0.001317943638748118
+        "coefficient": 0.0013154275259184597
       },
       {
         "feature": "spy_ret_10d",
-        "coefficient": -0.0012930084726670437
+        "coefficient": -0.0012898947139444864
       },
       {
         "feature": "spy_vol_10d",
-        "coefficient": 0.0012844849897204681
+        "coefficient": 0.001283427579155948
       },
       {
         "feature": "spy_ret_5d",
-        "coefficient": -0.0009366996830389008
+        "coefficient": -0.0009369455521404103
       },
       {
         "feature": "vix3m",
-        "coefficient": 0.0009102254984725058
+        "coefficient": 0.0009113350405251996
       },
       {
         "feature": "spy_vol_20d",
-        "coefficient": 0.0007764275641951451
+        "coefficient": 0.0007755002826521001
       },
       {
         "feature": "drawdown_60d",
-        "coefficient": 0.000739002107601128
+        "coefficient": 0.0007409555298643751
       },
       {
         "feature": "spy_ret_20d",
-        "coefficient": -0.000657102064485418
+        "coefficient": -0.0006598470790333407
       },
       {
         "feature": "spy_vol_60d",
-        "coefficient": 0.0005696671057027246
+        "coefficient": 0.0005681985013100769
       },
       {
         "feature": "corr_spy_hyg_20d",
-        "coefficient": -0.00030926130730204673
+        "coefficient": -0.000308984444253053
       },
       {
         "feature": "corr_spy_tlt_20d",
-        "coefficient": 0.0003089121597107116
+        "coefficient": 0.00030261813459881836
       },
       {
         "feature": "corr_spy_hyg_60d",
-        "coefficient": -0.0002716695467626905
+        "coefficient": -0.0002688563097440893
       },
       {
         "feature": "hyg_tlt_spread",
-        "coefficient": -0.00026083684765075674
+        "coefficient": -0.00025783140491026507
       },
       {
         "feature": "corr_spy_tlt_60d",
-        "coefficient": -0.00022047815482106393
+        "coefficient": -0.0002248744557008474
       },
       {
         "feature": "spy_ret_60d",
-        "coefficient": -0.0001472798394783751
+        "coefficient": -0.00014427782755813167
       },
       {
         "feature": "rsi_spy_14",
-        "coefficient": 0.000135120736161055
+        "coefficient": 0.0001364647025690597
       },
       {
         "feature": "spy_ret_1d",
-        "coefficient": -0.00011638699581395574
+        "coefficient": -0.00011828959198198868
       }
     ]
   },
   "comparison": {
-    "baseline_val_rmse": 0.011430120709467202,
-    "improvement_pct": -1.2745478812808912
+    "baseline_val_rmse": 0.011429866576858641,
+    "improvement_pct": -1.291177830408187
   }
 }

@@ -22,6 +22,7 @@ services:
       - .env
     volumes:
       - ./data:/app/data
+      - ./services/ingest:/app/services/ingest
     command: ["python", "services/ingest/app.py"]
 
   # Features Service: computes 21 Level 1 features from curated data
@@ -38,6 +39,7 @@ services:
       - ingest
     volumes:
       - ./data:/app/data
+      - ./services/features:/app/services/features
     command: ["python", "services/features/app.py"]
 
   # Test Service: runs pytest with coverage
@@ -70,7 +72,8 @@ services:
       - features
     volumes:
       - ./data:/app/data
-    command: ["python", "app.py"]
+      - ./services/prepare_dataset:/app/services/prepare_dataset
+    command: ["python", "services/prepare_dataset/app.py"]
 
   # Training Service: trains model with best hyperparameters from tuning
   # Reads from data/master_dataset.parquet, saves model to models/ directory
@@ -89,6 +92,7 @@ services:
       - ./final_model:/app/final_model
       - ./models:/app/models
       - ./libs:/app/libs
+      - ./services/train:/app/services/train
     command: ["python", "services/train/app.py"]
 
   # Prediction Service: generates daily volatility forecasts
@@ -106,7 +110,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./models:/app/models
-    command: ["python", "app.py"]
+      - ./services/predict:/app/services/predict
+    command: ["python", "services/predict/app.py"]
 
   # Monitoring Service: tracks production performance and detects drift
   # Compares past predictions (5+ days old) with actual outcomes

@@ -5,11 +5,11 @@
     "max_depth": 3,
     "n_estimators": 300,
     "reg_alpha": 0,
-    "reg_lambda": 5,
-    "subsample": 0.7
+    "reg_lambda": 2,
+    "subsample": 0.5
   },
-  "cv_score": 0.010039156606413035,
-  "timestamp": "2026-01-06T18:10:42.976191",
-  "n_train_samples": 3565,
+  "cv_score": 0.010011578432522084,
+  "timestamp": "2026-01-22T16:25:41.246215",
+  "n_train_samples": 3574,
   "n_features": 20
 }

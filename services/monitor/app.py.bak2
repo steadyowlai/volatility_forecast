@@ -38,10 +38,10 @@ def main():
     master_df = master_df.sort_values('date')
     print(f"✓ Master dataset: {len(master_df)} samples ({master_df['date'].min().date()} to {master_df['date'].max().date()})")
     
-    model_a = storage.read_pickle("data/models/ensemble_90pct.pkl")
-    model_b = storage.read_pickle("data/models/ensemble_100pct.pkl")
-    print(f"✓ Ensemble 90%: {len(model_a['feature_cols'])} features")
-    print(f"✓ Ensemble 100%: {len(model_b['feature_cols'])} features")
+    model_a = storage.read_pickle("data/models/model_90pct.pkl")
+    model_b = storage.read_pickle("data/models/model_100pct.pkl")
+    print(f"✓ Model A (90%): {len(model_a['feature_cols'])} features")
+    print(f"✓ Model B (100%): {len(model_b['feature_cols'])} features")
     
     val_baseline = storage.read_json("data/train/validation_baseline.json")
     dual_baseline = storage.read_json("data/train/dual_model_baseline.json")

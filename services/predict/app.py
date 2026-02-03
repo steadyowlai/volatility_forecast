@@ -1,55 +1,108 @@
 """
-Prediction Service
+Prediction Service - Multi-Model Daily Predictions
 
-loads production model and makes daily volatility predictions
-predicts next-day volatility using latest available features
+Loads all 6 models and makes daily volatility predictions:
+- xgboost_90pct, lightgbm_90pct, ensemble_90pct
+- xgboost_100pct, lightgbm_100pct, ensemble_100pct
 
-SMART LOGIC:
-- Checks prediction_history.jsonl for last predicted date
-- Only predicts for dates after last prediction
-- Avoids re-predicting same dates
+Saves predictions to data/predict/ with date partitions and latest/ folder.
+No MLflow - designed for AWS Lambda deployment.
 """
 
 import os
+import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
-# Local experiment tracker
-from experiment_tracker import experiment_run
-
-# Storage abstraction layer
 from storage import Storage
-
-# Prediction status tracking
-from prediction_status import get_last_prediction_date, log_prediction, get_prediction_history
 
 # Initialize storage
 storage = Storage()
 
-#configuration
+# Configuration
 DATA_FEATURES = "data/features.L1"
-DATA_PREDICTIONS = "data/predictions"
-EXPERIMENTS_DIR = "models/experiments"
-EXPERIMENT_NAME = "predictions"
+DATA_PREDICTIONS = Path("data/predict")
+MODELS_DIR = Path("data/models")
+
+
+def get_prediction_date():
+    """Get current date in YYYY-MM-DD format for date-based storage"""
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def append_prediction_history(features_date, prediction_date):
+    """
+    Append prediction run info to prediction_history.jsonl
+    
+    Args:
+        features_date: date features came from
+        prediction_date: date being predicted for
+    """
+    timestamp = datetime.now().isoformat()
+    
+    history_entry = {
+        'timestamp': timestamp,
+        'prediction_date': str(prediction_date),
+        'features_date': str(features_date)
+    }
+    
+    # Ensure directory exists
+    os.makedirs(str(DATA_PREDICTIONS), exist_ok=True)
+    
+    # Append to JSONL file
+    history_file = DATA_PREDICTIONS / "prediction_history.jsonl"
+    with open(str(history_file), "a") as f:
+        f.write(json.dumps(history_entry) + '\n')
+    
+    print(f"appended to {history_file}")
+
+
+def get_last_prediction_date():
+    """
+    Get the last prediction date from prediction_history.jsonl
+    
+    Returns:
+        date object or None
+    """
+    history_file = DATA_PREDICTIONS / "prediction_history.jsonl"
+    
+    if not history_file.exists():
+        return None
+    
+    try:
+        with open(str(history_file), 'r') as f:
+            lines = f.readlines()
+        
+        if not lines:
+            return None
+        
+        # Get last line
+        last_entry = json.loads(lines[-1])
+        pred_date_str = last_entry.get('prediction_date')
+        
+        if pred_date_str:
+            return pd.to_datetime(pred_date_str).date()
+        
+        return None
+    except Exception as e:
+        print(f"warning: could not read prediction_history.jsonl: {e}")
+        return None
 
 
 def get_latest_features():
     """
-    load most recent features from data/features.L1/
+    Load most recent features from data/features.L1/
     
-    Optimized: Instead of listing all 4000+ files, check backwards from today
-    to find the most recent feature date that exists.
+    Optimized: Check backwards from today instead of listing 4000+ files
     
-    returns: (features_df, features_date)
+    Returns:
+        (features_df, features_date)
     """
-    from datetime import date
-    
     # Start from today and check backwards
-    # Most likely the latest features are from yesterday or today
     check_date = date.today()
-    max_days_back = 10  # Check up to 10 days back
+    max_days_back = 10
     
     for days_ago in range(max_days_back):
         features_path = f"{DATA_FEATURES}/date={check_date}/features.parquet"
@@ -60,153 +113,133 @@ def get_latest_features():
         
         check_date -= timedelta(days=1)
     
-    # If nothing found in last 10 days, fall back to scanning all files
-    print("warning: no features found in last 10 days, scanning all files...")
-    files = storage.list_files(f"{DATA_FEATURES}/")
-    
-    dates = []
-    for file_path in files:
-        if "/date=" in file_path and file_path.endswith("features.parquet"):
-            try:
-                date_str = file_path.split("/date=")[1].split("/")[0]
-                dates.append(pd.to_datetime(date_str).date())
-            except:
-                pass
-    
-    if not dates:
-        raise ValueError("no features found in data/features.L1/")
-    
-    latest_date = max(dates)
-    features_path = f"{DATA_FEATURES}/date={latest_date}/features.parquet"
-    
-    print(f"loading features from {latest_date}")
-    df = storage.read_parquet(features_path)
-    
-    return df, latest_date
+    raise ValueError(f"no features found in last {max_days_back} days")
 
 
-def load_production_model():
+def load_all_models():
     """
-    load latest production model from local filesystem
+    Load all 6 models from data/models/latest/
     
-    training service saves model to models/latest_ensemble.pkl
-    
-    returns: (ensemble_dict, model_path)
+    Returns:
+        dict mapping model_name to model artifact
     """
-    model_path = "models/latest_ensemble.pkl"
+    models = {}
+    model_names = [
+        'xgboost_90pct',
+        'lightgbm_90pct', 
+        'ensemble_90pct',
+        'xgboost_100pct',
+        'lightgbm_100pct',
+        'ensemble_100pct'
+    ]
     
-    if not storage.exists(model_path):
-        raise FileNotFoundError(
-            f"Model not found at {model_path}. "
-            "Run training service first to generate model."
-        )
+    for model_name in model_names:
+        model_path = f"{MODELS_DIR}/latest/{model_name}.pkl"
+        
+        if not storage.exists(model_path):
+            print(f"warning: {model_name} not found at {model_path}, skipping")
+            continue
+        
+        models[model_name] = storage.read_pickle(model_path)
+        print(f"loaded {model_name}")
     
-    print(f"loading model from {model_path}")
-    ensemble = storage.read_pickle(model_path)
-    print("loaded ensemble successfully")
+    if not models:
+        raise FileNotFoundError("no models found in data/models/latest/")
     
-    return ensemble, model_path
+    return models
 
 
-def make_prediction(ensemble, features_df, features_date):
+def make_prediction(model, features_df, model_name):
     """
-    make prediction using ensemble model
+    Make prediction using a single model
     
-    ensemble is dict with keys: xgb_model, lgbm_model, meta_model, feature_cols
+    Args:
+        model: model artifact dict with 'model' or 'xgb_model', 'lgbm_model', 'meta_model'
+        features_df: dataframe with features
+        model_name: name of the model
     
-    returns: (prediction_value, prediction_date)
+    Returns:
+        predicted volatility (float)
     """
-    #extract models and feature columns from ensemble
-    xgb_model = ensemble['xgb_model']
-    lgbm_model = ensemble['lgbm_model']
-    meta_model = ensemble['meta_model']
-    feature_cols = ensemble['feature_cols']
-    
-    #prepare features
+    feature_cols = model['feature_cols']
     X = features_df[feature_cols].values
     
-    #step 1: get base model predictions
-    xgb_pred = xgb_model.predict(X)
-    lgbm_pred = lgbm_model.predict(X)
+    # Check if it's an ensemble or individual model
+    if 'ensemble' in model_name:
+        # Ensemble model: use all 3 models
+        xgb_pred = model['xgb_model'].predict(X)
+        lgbm_pred = model['lgbm_model'].predict(X)
+        X_meta = np.column_stack([xgb_pred, lgbm_pred])
+        prediction = model['meta_model'].predict(X_meta)[0]
+    else:
+        # Individual model: xgboost or lightgbm
+        prediction = model['model'].predict(X)[0]
     
-    #step 2: stack predictions
-    X_meta = np.column_stack([xgb_pred, lgbm_pred])
-    
-    #step 3: final prediction from meta-learner
-    prediction = meta_model.predict(X_meta)[0]
-    
-    #prediction is for next day
-    prediction_date = features_date + timedelta(days=1)
-    
-    return prediction, prediction_date
+    return float(prediction)
 
 
-def save_prediction(prediction, prediction_date, features_date, model_path):
+def save_predictions(predictions, features_date, prediction_date):
     """
-    save prediction to data/predictions/ in partitioned format
+    Save all predictions to date folder and latest folder
     
-    saves as date=YYYY-MM-DD/prediction.parquet
+    Args:
+        predictions: dict mapping model_name to prediction value
+        features_date: date features came from
+        prediction_date: date being predicted for
     """
+    timestamp = datetime.now().isoformat()
+    pred_date_str = get_prediction_date()
     
-    #create prediction record
-    pred_df = pd.DataFrame([{
-        'prediction_date': prediction_date,
-        'predicted_volatility': prediction,
-        'features_date': features_date,
-        'model_path': str(model_path),
-        'prediction_timestamp': datetime.now()
-    }])
+    # Ensure parent directory exists
+    os.makedirs(str(DATA_PREDICTIONS), exist_ok=True)
     
-    #write to partition
-    outpath = f"{DATA_PREDICTIONS}/date={prediction_date}/prediction.parquet"
-    storage.write_parquet(pred_df, outpath)
+    # Create date folder
+    date_folder = DATA_PREDICTIONS / f"date={pred_date_str}"
+    os.makedirs(str(date_folder), exist_ok=True)
     
-    print(f"saved prediction to {outpath}")
+    # Create latest folder
+    latest_folder = DATA_PREDICTIONS / "latest"
+    os.makedirs(str(latest_folder), exist_ok=True)
     
-    return outpath
-
-
-def log_experiment_prediction(prediction, prediction_date, features_date, model_path):
-    """
-    log prediction using simple JSON tracker
-    This updates predictions_latest.json automatically
-    """
-    
-    with experiment_run(EXPERIMENT_NAME, run_name=f"prediction-{prediction_date}") as tracker:
-        # Log prediction metadata
-        tracker.log_params({
+    for model_name, predicted_volatility in predictions.items():
+        pred_data = {
             'prediction_date': str(prediction_date),
+            'predicted_volatility': predicted_volatility,
             'features_date': str(features_date),
-            'model_path': str(model_path),
-            'prediction_timestamp': datetime.now().isoformat()
-        })
+            'model_name': model_name,
+            'prediction_timestamp': timestamp
+        }
         
-        # Log prediction value
-        tracker.log_metrics({
-            'predicted_volatility': float(prediction)
-        })
+        # Save to date folder
+        date_file = date_folder / f"{model_name}.json"
+        with open(str(date_file), 'w') as f:
+            json.dump(pred_data, f, indent=2)
+        print(f"saved {date_file}")
         
-        print(f"✅ Prediction logged to {EXPERIMENTS_DIR}")
+        # Save to latest folder (overwrite)
+        latest_file = latest_folder / f"{model_name}.json"
+        with open(str(latest_file), 'w') as f:
+            json.dump(pred_data, f, indent=2)
+    
+    print(f"also saved to {latest_folder}/ for easy access")
 
 
 def main():
-    print("="*60)
-    print("Volatility Forecasting - Prediction Service")
-    print("="*60)
+    print("\n" + "="*70)
+    print("Volatility Forecasting - Multi-Model Prediction Service")
+    print("="*70)
     
     # Check what was last predicted
     print("\nChecking prediction status...")
     last_predicted_date = get_last_prediction_date()
     
     if last_predicted_date:
-        last_pred_date_obj = pd.to_datetime(last_predicted_date).date()
         print(f"last prediction made for: {last_predicted_date}")
     else:
-        last_pred_date_obj = None
         print("no previous predictions found")
     
-    #load latest features
-    print("\nloading features...")
+    # Load latest features
+    print("\nLoading features...")
     features_df, features_date = get_latest_features()
     print(f"features shape: {features_df.shape}")
     print(f"features available for: {features_date}")
@@ -215,51 +248,65 @@ def main():
     prediction_date = features_date + timedelta(days=1)
     
     # Check if we already predicted this date
-    if last_pred_date_obj and prediction_date <= last_pred_date_obj:
+    if last_predicted_date and prediction_date <= last_predicted_date:
         print(f"\n⚠️  Already predicted for {prediction_date}")
+        print(f"   Features: {features_date}")
         print(f"   Last prediction: {last_predicted_date}")
         print(f"   Nothing new to predict")
-        print("\n" + "="*60)
+        print("\n" + "="*70)
         print("Prediction Service - Already Up-to-Date")
-        print("="*60)
+        print("="*70)
         return
     
-    #load production model
-    print("\nloading model...")
-    ensemble, model_path = load_production_model()
+    # Load all models
+    print("\nLoading models...")
+    models = load_all_models()
+    print(f"loaded {len(models)} models")
     
-    #make prediction
-    print("\nmaking prediction...")
-    prediction, prediction_date = make_prediction(ensemble, features_df, features_date)
+    # Make predictions with all models
+    print("\nMaking predictions...")
+    predictions = {}
+    
+    for model_name, model in models.items():
+        prediction = make_prediction(model, features_df, model_name)
+        predictions[model_name] = prediction
+        print(f"{model_name}: {prediction:.6f}")
     
     print(f"\nfeatures from: {features_date}")
     print(f"predicting for: {prediction_date}")
-    print(f"predicted volatility: {prediction:.6f}")
     
-    #save prediction to partition
-    print("\nsaving prediction...")
-    save_prediction(prediction, prediction_date, features_date, model_path)
+    # Save predictions
+    print("\nSaving predictions...")
+    save_predictions(predictions, features_date, prediction_date)
     
-    #log to experiment tracker (updates predictions_latest.json)
-    print("\nlogging to experiment tracker...")
-    log_experiment_prediction(prediction, prediction_date, features_date, model_path)
+    # Log to prediction history
+    print("\nLogging to prediction history...")
+    append_prediction_history(features_date, prediction_date)
     
-    #log to consolidated history
-    print("\nlogging to prediction history...")
-    log_prediction(
-        prediction_date=str(prediction_date),
-        predicted_value=float(prediction),
-        features_date=str(features_date),
-        model_path=str(model_path)
-    )
-    
-    print("\n" + "="*60)
+    # Summary
+    print("\n" + "="*70)
     print("Prediction Complete")
-    print("="*60)
+    print("="*70)
+    print(f"\nPredictions for {prediction_date}:")
     
-    print("\n" + "="*60)
-    print("Prediction Complete")
-    print("="*60)
+    # Group by model type
+    print("\n90% Split Models:")
+    for name in ['xgboost_90pct', 'lightgbm_90pct', 'ensemble_90pct']:
+        if name in predictions:
+            print(f"  {name}: {predictions[name]:.6f}")
+    
+    print("\n100% Split Models:")
+    for name in ['xgboost_100pct', 'lightgbm_100pct', 'ensemble_100pct']:
+        if name in predictions:
+            print(f"  {name}: {predictions[name]:.6f}")
+    
+    print(f"\nArtifacts saved:")
+    print(f"data/predict/date={get_prediction_date()}/ (6 JSON files)")
+    print(f"data/predict/latest/ (6 JSON files)")
+    print(f"data/predict/prediction_history.jsonl")
+    
+    print("="*70)
+
 
 if __name__ == "__main__":
     main()

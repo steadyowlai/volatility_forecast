@@ -1,17 +1,17 @@
 [
   {
     "patience": 30,
-    "stopped_at": 332,
-    "val_rmse": 0.011631985499971463
+    "stopped_at": 312,
+    "val_rmse": 0.0113174225040127
   },
   {
     "patience": 50,
-    "stopped_at": 564,
-    "val_rmse": 0.011486209539175181
+    "stopped_at": 388,
+    "val_rmse": 0.011283314298938172
   },
   {
     "patience": 100,
-    "stopped_at": 564,
-    "val_rmse": 0.011486209539175181
+    "stopped_at": 388,
+    "val_rmse": 0.011283314298938172
   }
 ]

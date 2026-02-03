@@ -26,10 +26,22 @@ def get_status(status_path: Path = DEFAULT_STATUS_PATH) -> dict:
     Read the current data status.
     
     Returns:
-        dict with keys:
-            - last_date: Last date in master_dataset.parquet (YYYY-MM-DD)
-            - rows: Number of rows in master_dataset
-            - updated_at: ISO timestamp of last update
+        dict with nested structure:
+            - master_dataset:
+                - last_date: Last date in master_dataset.parquet (YYYY-MM-DD)
+                - rows: Number of rows in master_dataset
+                - updated_at: ISO timestamp of last update
+            - predict_dataset:
+                - last_date: Last date in predict_dataset.parquet
+                - rows: Number of rows in predict_dataset
+                - recent_start/end: Date range of recent window (last 30 rows)
+                - future_start/end: Date range of future dates (optional)
+                - updated_at: ISO timestamp of last update
+            
+        Also includes legacy top-level fields for backward compatibility:
+            - last_date: Same as master_dataset.last_date
+            - rows: Same as master_dataset.rows
+            - updated_at: Timestamp
     
     Returns empty dict if file doesn't exist.
     """
@@ -91,8 +103,18 @@ def get_last_date(status_path: Path = DEFAULT_STATUS_PATH) -> Optional[str]:
     """
     Get the last date in master_dataset from status file.
     
+    Supports both new nested structure and legacy format:
+    - New: status['master_dataset']['last_date']
+    - Legacy: status['last_date']
+    
     Returns:
         Date string (YYYY-MM-DD) or None if not available
     """
     status = get_status(status_path)
+    
+    # Try new nested structure first
+    if 'master_dataset' in status and 'last_date' in status['master_dataset']:
+        return status['master_dataset']['last_date']
+    
+    # Fallback to legacy top-level field
     return status.get('last_date')

@@ -308,7 +308,8 @@ def prepare_dataset():
         print("\n" + "="*60)
         print("Dataset Already Up-to-Date - No Action Needed")
         print("="*60)
-        return None
+        # Return None for master_last_date, empty list for future_dates
+        return None, []
     
     mode = "full rebuild" if is_full_rebuild else "incremental update"
     print(f"\nMode: {mode}")
@@ -350,18 +351,32 @@ def prepare_dataset():
     if len(new_data) > 0:
         print(f"  date range: {new_data['date'].min().date()} to {new_data['date'].max().date()}")
     
+    # Track which feature dates don't have labels (future dates for predict_dataset)
+    feature_dates = set(features['date'].dt.date)
+    merged_dates = set(new_data['date'].dt.date)
+    future_dates_before_cleaning = feature_dates - merged_dates
+    
     # Drop rows with any NaN values
     initial_rows = len(new_data)
     new_data = new_data.dropna()
     dropped_rows = initial_rows - len(new_data)
     
+    # Track dates that were dropped due to NaN (also future dates)
+    clean_dates = set(new_data['date'].dt.date)
+    future_dates_after_cleaning = merged_dates - clean_dates
+    
+    # All future dates = dates without labels + dates with NaN
+    all_future_dates = sorted(list(future_dates_before_cleaning | future_dates_after_cleaning))
+    
     print(f"\nStep 6: Cleaning new data...")
     print(f"  dropped {dropped_rows} rows with NaN values")
     print(f"  clean new data: {len(new_data)} rows")
+    print(f"  future dates (features without labels): {len(all_future_dates)}")
     
     if len(new_data) == 0:
         print("\nWarning: No valid data after cleaning - nothing to add")
-        return None
+        # Still return future dates for predict_dataset
+        return None, all_future_dates
     
     # Load existing master dataset and append new data
     print(f"\nStep 7: Updating master dataset...")
@@ -407,19 +422,166 @@ def prepare_dataset():
     print(f"  last_date: {last_date}")
     print(f"  rows: {len(df)}")
     update_status(
-        last_date=last_date,
-        rows=len(df)
+        master_last_date=last_date,
+        master_rows=len(df)
     )
     
     print("\n" + "="*60)
     print("Dataset Preparation Complete")
     print("="*60)
     
-    return df
+    # Return master_last_date and future_dates for predict_dataset
+    # future_dates = dates with features but no labels (already computed above)
+    return df['date'].max().date(), all_future_dates
+
+
+def create_predict_dataset(master_last_date=None, future_dates=None):
+    """
+    Create predict_dataset.parquet with last 30 rows + future dates.
+    
+    predict_dataset contains:
+    1. Last 30 rows from master_dataset (features only, no rv_5d)
+    2. Future dates (features beyond master_dataset, no rv_5d)
+    
+    This is used by predict service for daily predictions.
+    
+    Args:
+        master_last_date: Last date in master_dataset (not currently used, kept for compatibility)
+        future_dates: List of dates with features but no labels (from prepare_dataset)
+                     If None, will scan features.L1/ to find them
+    """
+    print("\n" + "="*60)
+    print("Creating Predict Dataset")
+    print("="*60)
+    
+    # Check if master_dataset exists
+    if not storage.exists(OUTPUT_PATH):
+        print("master_dataset.parquet not found. Run prepare_dataset first.")
+        return None
+    
+    # Load master_dataset
+    print("\nStep 1: Loading master_dataset...")
+    master = storage.read_parquet(OUTPUT_PATH)
+    master['date'] = pd.to_datetime(master['date'])
+    print(f"  master_dataset: {len(master)} rows")
+    print(f"  date range: {master['date'].min().date()} to {master['date'].max().date()}")
+    
+    # Get feature columns (exclude date and rv_5d)
+    feature_cols = [c for c in master.columns if c not in ['date', 'rv_5d']]
+    print(f"  feature columns: {len(feature_cols)}")
+    
+    # Get last 30 rows (features only)
+    print("\nStep 2: Extracting last 30 rows for test set...")
+    recent_rows = master.tail(30)[['date'] + feature_cols].copy()
+    print(f"  recent rows: {len(recent_rows)}")
+    print(f"  date range: {recent_rows['date'].min().date()} to {recent_rows['date'].max().date()}")
+    
+    # Get future dates (features beyond master_dataset)
+    print("\nStep 3: Finding future dates (features without labels)...")
+    
+    # Use future_dates passed from prepare_dataset if available
+    # Otherwise, scan features.L1/ (fallback for standalone runs)
+    if future_dates is not None:
+        print(f"  using future dates from prepare_dataset (efficient, no re-scan)")
+        # future_dates is already a list of date objects
+        if not isinstance(future_dates, list):
+            future_dates = list(future_dates)
+    else:
+        print(f"  scanning features.L1/ for future dates (fallback mode)")
+        # Get master_last_date
+        if master_last_date is None:
+            master_last_date = master['date'].max().date()
+        
+        # Sequential search for future feature dates
+        next_date = master_last_date + timedelta(days=1)
+        future_dates = []
+        max_gap = 30  # Stop after 30 consecutive missing dates
+        consecutive_missing = 0
+        
+        while consecutive_missing < max_gap:
+            feature_path = f"{DATA_FEATURES}/date={next_date}/features.parquet"
+            if storage.exists(feature_path):
+                future_dates.append(next_date)
+                consecutive_missing = 0
+            else:
+                consecutive_missing += 1
+            next_date = next_date + timedelta(days=1)
+    
+    print(f"  found {len(future_dates)} future dates")
+    if future_dates:
+        print(f"  date range: {future_dates[0]} to {future_dates[-1]}")
+    
+    # Load future features if any exist
+    if future_dates:
+        print("\nStep 4: Loading future features...")
+        future_rows = load_features(date_filter=future_dates)
+        print(f"  loaded {len(future_rows)} rows")
+        
+        # Combine recent + future
+        predict_df = pd.concat([recent_rows, future_rows], ignore_index=True)
+    else:
+        print("\nStep 4: No future features found, using only recent rows")
+        predict_df = recent_rows
+    
+    # Sort and save
+    predict_df = predict_df.sort_values('date').reset_index(drop=True)
+    
+    print("\nStep 5: Saving predict_dataset...")
+    predict_output = "data/predict_dataset.parquet"
+    storage.write_parquet(predict_df, predict_output)
+    
+    print(f"  saved to: {predict_output}")
+    print(f"  rows: {len(predict_df)}")
+    print(f"  columns: {len(predict_df.columns)}")
+    
+    # Summary
+    print(f"\nPredict Dataset Summary:")
+    print(f"  total rows: {len(predict_df)}")
+    print(f"  recent rows (test set): {len(recent_rows)}")
+    print(f"  future rows: {len(predict_df) - len(recent_rows)}")
+    print(f"  date range: {predict_df['date'].min().date()} to {predict_df['date'].max().date()}")
+    print(f"  columns: date + {len(feature_cols)} features (NO rv_5d)")
+    
+    # Update data status
+    print("\nStep 6: Updating data_status.json...")
+    update_status(
+        predict_last_date=predict_df['date'].max().strftime('%Y-%m-%d'),
+        predict_rows=len(predict_df),
+        predict_recent_start=recent_rows['date'].min().strftime('%Y-%m-%d'),
+        predict_recent_end=recent_rows['date'].max().strftime('%Y-%m-%d'),
+        predict_future_start=future_dates[0].strftime('%Y-%m-%d') if future_dates else None,
+        predict_future_end=future_dates[-1].strftime('%Y-%m-%d') if future_dates else None
+    )
+    
+    print("\n" + "="*60)
+    print("Predict Dataset Creation Complete")
+    print("="*60)
+    
+    return predict_df
+
 
 def main():
     try:
-        prepare_dataset()
+        # Step 1: Prepare master_dataset (labeled data)
+        result = prepare_dataset()
+        
+        # Extract future dates from result
+        # result is tuple: (master_last_date, future_dates)
+        # master_last_date can be None if no updates, future_dates is list (possibly empty)
+        master_last_date, future_dates = result
+        
+        if master_last_date is None:
+            print("\nNote: No new data added to master_dataset")
+        else:
+            print(f"\nPrepare dataset updated: master_last_date={master_last_date}")
+        
+        print(f"Future dates for predict_dataset: {len(future_dates)} dates")
+        
+        # Step 2: Create predict_dataset (last 30 rows + future)
+        # Always run this, even if master_dataset wasn't updated
+        # Pass future_dates to avoid re-scanning features.L1/
+        create_predict_dataset(master_last_date=master_last_date, future_dates=future_dates)
+        
     except Exception as e:
         print(f"\nError: {e}")
         import traceback

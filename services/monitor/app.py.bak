@@ -38,13 +38,13 @@ def main():
     master_df = master_df.sort_values('date')
     print(f"✓ Master dataset: {len(master_df)} samples ({master_df['date'].min().date()} to {master_df['date'].max().date()})")
     
-    model_a = storage.read_pickle("data/models/ensemble_90pct.pkl")
-    model_b = storage.read_pickle("data/models/ensemble_100pct.pkl")
-    print(f"✓ Ensemble 90%: {len(model_a['feature_cols'])} features")
-    print(f"✓ Ensemble 100%: {len(model_b['feature_cols'])} features")
+    model_a = storage.read_pickle("models/model_90pct.pkl")
+    model_b = storage.read_pickle("models/model_100pct.pkl")
+    print(f"✓ Model A (90%): {len(model_a['feature_cols'])} features")
+    print(f"✓ Model B (100%): {len(model_b['feature_cols'])} features")
     
-    val_baseline = storage.read_json("data/train/validation_baseline.json")
-    dual_baseline = storage.read_json("data/train/dual_model_baseline.json")
+    val_baseline = storage.read_json("models/validation_baseline.json")
+    dual_baseline = storage.read_json("models/dual_model_baseline.json")
     baseline_rmse = val_baseline['validation_rmse']
     model_a_cutoff = pd.to_datetime(dual_baseline['model_a']['training_date_end'])
     model_b_cutoff = pd.to_datetime(dual_baseline['model_b']['training_date_end'])
@@ -94,7 +94,7 @@ def main():
             'drift': {'pct': drift_pct, 'status': 'ok' if abs(drift_pct) < 5 else 'warning'},
             'comparison': {'status': 'no_new_data'},
             'recommendation': 'USE MODEL A (90%)'
-        }, "data/monitor/monitoring_history.jsonl")
+        }, "data/predictions/monitoring_history.jsonl")
         return
     
     print(f"New data: {len(new_df)} samples ({new_df['date'].min().date()} to {new_df['date'].max().date()})")
@@ -163,7 +163,7 @@ def main():
         },
         'recommendation': recommendation,
         'reason': reason
-    }, "data/monitor/monitoring_history.jsonl")
+    }, "data/predictions/monitoring_history.jsonl")
     
     print("\n✅ Monitoring complete - record saved")
 
