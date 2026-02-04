@@ -1,44 +1,21 @@
 {
-  "model_name": "Stacking Ensemble (XGBoost + LightGBM)",
-  "model_architecture": "Stacking with Ridge Meta-Learner",
-  "research_date": "2026-01-06",
-  "data_period": {
-    "start": "2010-01-04",
-    "end": "2025-12-02",
-    "n_train": 3565,
-    "n_val": 397,
-    "n_features": 20
-  },
-  "expected_performance": {
-    "train_rmse": 0.007307925086365889,
-    "train_mae": 0.0049162875773807605,
-    "train_r2": 0.7463997350801341,
-    "val_rmse": 0.011283515990667684,
-    "val_mae": 0.006578497345719584,
-    "val_r2": 0.445571445894153,
-    "generalization_gap_pct": -54.40109001279857
-  },
-  "base_model_performance": {
-    "xgboost": {
-      "val_rmse": 0.011486209539175181,
-      "val_mae": 0.006804787806917699,
-      "val_r2": 0.42547337317947465
+  "timestamp": "2026-02-03T23:19:53.919523Z",
+  "model_name": "xgb_tuned",
+  "metrics": {
+    "train": {
+      "rmse": 0.008045408197754638,
+      "mae": 0.005604441560017746,
+      "r2": 0.7170392862840006
     },
-    "lightgbm": {
-      "val_rmse": 0.011316136004404452,
-      "val_mae": 0.0066948989830075715,
-      "val_r2": 0.44236116833476335
+    "val": {
+      "rmse": 0.00907279671175083,
+      "mae": 0.00558345122421248,
+      "r2": 0.453820241414309
+    },
+    "test": {
+      "rmse": 0.004869681452443808,
+      "mae": 0.0041195188750506005,
+      "r2": -0.7500920503923685
     }
-  },
-  "improvement_analysis": {
-    "vs_xgboost_pct": 1.764668734417429,
-    "vs_lightgbm_pct": 0.28826106123213063,
-    "vs_baseline_pct": 1.2826174152132097
-  },
-  "monitoring_thresholds": {
-    "max_val_rmse": 0.0095,
-    "min_val_r2": 0.4,
-    "max_generalization_gap_pct": 20.0,
-    "drift_alert_rmse": 0.01
   }
 }

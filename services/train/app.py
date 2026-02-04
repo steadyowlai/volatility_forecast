@@ -1,797 +1,165 @@
 """
-Training Service - Dual Model Strategy
+Training Service (XGBoost)
 
-Trains two stacking ensembles (XGBoost + LightGBM + Ridge meta-learner):
-- Model 90%: trained on 80% with 20% validation (true out-of-sample metrics)
-- Model 100%: trained on all data minus last 30 days (tested on last 30 if enough data)
+Trains a single XGBoost model to forecast 5-day realized volatility (RV_5d).
+Uses all rows except the last 30 from data/master_dataset.parquet.
+Hyperparameters are loaded from final_model/model_config.json.
 
-Saves models to data/models/ with date partitions and latest/ folder.
-Saves validation history to data/train/validation/ for tracking over time.
-No MLflow - designed for AWS Lambda deployment.
+Saves:
+- data/models/date=YYYY-MM-DD/xgboost.pkl
+- data/models/latest/xgboost.pkl (overwrites previous latest)
+- data/train/train_history.json (JSONL append)
 """
 
-import os
 import json
-import pandas as pd
-import numpy as np
-from pathlib import Path
 from datetime import datetime
 
-import xgboost as xgb
-import lightgbm as lgb
-from sklearn.linear_model import Ridge
+import numpy as np
+import pandas as pd
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from xgboost import XGBRegressor
 
-from storage import Storage
-
-# Initialize storage
-storage = Storage()
-
-# Configuration
-DATA_CURATED = Path("data/curated.market")
-DATA_FEATURES = Path("data/features.L1")
-MODELS_DIR = Path("data/models")
-TRAIN_DATA_DIR = Path("data/train")
-MODEL_CONFIG = Path("final_model/model_config.json")
-BENCHMARK_CONFIG = Path("final_model/benchmark_results.json")
-HOLDOUT_SAMPLES = 30  # Last 30 days for model B testing
+from storage import get_storage
 
 
-def get_training_date():
-    """Get current date in YYYY-MM-DD format for date-based storage"""
-    return datetime.now().strftime("%Y-%m-%d")
+# paths
+MASTER_DATASET = "data/master_dataset.parquet"
+MODEL_CONFIG = "final_model/model_config.json"
+MODELS_ROOT = "data/models"
+TRAIN_HISTORY = "data/train/train_history.json"
 
 
-def append_validation_history(model_name, metrics, feature_importance=None, date_ranges=None):
-    """
-    Append validation metrics and feature importance to history files
-    
-    Args:
-        model_name: e.g. 'xgboost_90pct', 'lightgbm_100pct', etc.
-        metrics: dict with keys like train_rmse, val_rmse, train_samples, val_samples
-        feature_importance: dict mapping feature names to importance scores (optional)
-        date_ranges: dict with training_start_date, training_end_date, val_start_date, val_end_date (optional)
-    """
-    timestamp = datetime.now().isoformat()
-    training_date = get_training_date()
-    
-    # Convert numpy types to Python types for JSON serialization
-    def convert_to_python_types(obj):
-        if isinstance(obj, dict):
-            return {k: convert_to_python_types(v) for k, v in obj.items()}
-        elif isinstance(obj, (np.integer, np.floating)):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return obj
-    
-    metrics = convert_to_python_types(metrics)
-    if feature_importance is not None:
-        feature_importance = convert_to_python_types(feature_importance)
-    
-    # Append validation metrics
-    validation_file = f"{TRAIN_DATA_DIR}/validation/{model_name}_validation.json"
-    
-    validation_entry = {
-        'timestamp': timestamp,
-        'training_date': training_date,
-        **metrics
-    }
-    
-    # Add date ranges if provided
-    if date_ranges:
-        validation_entry.update({
-            'training_start_date': date_ranges.get('training_start_date'),
-            'training_end_date': date_ranges.get('training_end_date'),
-            'val_start_date': date_ranges.get('val_start_date'),
-            'val_end_date': date_ranges.get('val_end_date')
-        })
-    
-    # Read existing history or create new
-    if os.path.exists(validation_file):
-        with open(validation_file, 'r') as f:
-            history = json.load(f)
-    else:
-        history = []
-    
-    history.append(validation_entry)
-    
-    # Write back (ensure validation subdirectory exists)
-    os.makedirs(f"{TRAIN_DATA_DIR}/validation", exist_ok=True)
-    with open(validation_file, 'w') as f:
-        json.dump(history, f, indent=2)
-    
-    print(f"appended to {validation_file}")
-    
-    # Append feature importance if provided
-    if feature_importance is not None:
-        importance_file = f"{TRAIN_DATA_DIR}/validation/{model_name}_feature_importance.json"
-        
-        importance_entry = {
-            'timestamp': timestamp,
-            'training_date': training_date,
-            'feature_importance': feature_importance
-        }
-        
-        # Read existing history or create new
-        if os.path.exists(importance_file):
-            with open(importance_file, 'r') as f:
-                imp_history = json.load(f)
-        else:
-            imp_history = []
-        
-        imp_history.append(importance_entry)
-        
-        # Write back
-        with open(importance_file, 'w') as f:
-            json.dump(imp_history, f, indent=2)
-        
-        print(f"appended to {importance_file}")
+def compute_metrics(y_true, y_pred):
+	return {
+		"rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
+		"mae": float(mean_absolute_error(y_true, y_pred)),
+		"r2": float(r2_score(y_true, y_pred))
+	}
 
 
-def append_training_history(train_df, val_df):
-    """
-    Append training run dates to training_history.jsonl
-    
-    Args:
-        train_df: training dataframe with 'date' column
-        val_df: validation dataframe with 'date' column
-    """
-    timestamp = datetime.now().isoformat()
-    training_date = get_training_date()
-    
-    history_entry = {
-        'timestamp': timestamp,
-        'training_date': training_date,
-        'training_start_date': str(train_df['date'].min().date()),
-        'training_end_date': str(train_df['date'].max().date()),
-        'validation_start_date': str(val_df['date'].min().date()),
-        'validation_end_date': str(val_df['date'].max().date())
-    }
-    
-    # Ensure directory exists
-    os.makedirs(TRAIN_DATA_DIR, exist_ok=True)
-    
-    # Append to JSONL file
-    history_file = f"{TRAIN_DATA_DIR}/training_history.jsonl"
-    with open(history_file, 'a') as f:
-        f.write(json.dumps(history_entry) + '\n')
-    
-    print(f"appended to {history_file}")
+def load_model_config(storage):
+	"""Load model name + hyperparameters from final_model/model_config.json."""
+	if not storage.exists(MODEL_CONFIG):
+		raise FileNotFoundError(
+			f"model_config.json not found at {MODEL_CONFIG}. Run the export notebook first."
+		)
+
+	config = storage.read_json(MODEL_CONFIG)
+	hyper_block = config.get("hyperparams") or {}
+	model_name = hyper_block.get("model_name") or "xgboost"
+	hyperparams = hyper_block.get("hyperparams") or {}
+
+	return model_name, hyperparams
 
 
-def load_curated_data():
-    """Load curated market data for label generation"""
-    curated_path = DATA_CURATED
-    files = list(curated_path.glob("date=*/daily.parquet"))
-    
-    if not files:
-        raise FileNotFoundError(f"No curated data found in {curated_path}")
-    
-    print(f"Loading {len(files)} curated partitions...")
-    
-    # Load files with error handling for corrupted partitions
-    dfs = []
-    skipped = 0
-    for f in files:
-        try:
-            dfs.append(pd.read_parquet(f))
-        except Exception as e:
-            print(f"Warning: Skipping corrupted file {f.parent.name}/{f.name}: {str(e)[:50]}")
-            skipped += 1
-    
-    if skipped > 0:
-        print(f"Skipped {skipped} corrupted files")
-    
-    df = pd.concat(dfs, ignore_index=True)
-    df['date'] = pd.to_datetime(df['date'])
-    df = df.sort_values(['symbol', 'date']).reset_index(drop=True)
-    
-    return df
+def load_dataset(storage):
+	"""Load master_dataset.parquet and sort by date."""
+	if not storage.exists(MASTER_DATASET):
+		raise FileNotFoundError(
+			f"master_dataset.parquet not found at {MASTER_DATASET}. Run prepare_dataset first."
+		)
+
+	df = storage.read_parquet(MASTER_DATASET)
+	df["date"] = pd.to_datetime(df["date"])
+	df = df.sort_values("date").reset_index(drop=True)
+	return df
 
 
-def compute_rv_5d(df):
-    """
-    Compute 5 day forward realized volatility (target variable)
-    
-    RV_5d = sqrt(sum of next 5 daily squared returns)
-    This is what we're trying to predict.
-    """
-    spy = df[df['symbol'] == 'SPY'].copy()
-    spy = spy.sort_values('date').reset_index(drop=True)
-    
-    # Forward looking: sum of next 5 squared returns
-    spy['rv_5d'] = np.sqrt(
-        spy['ret'].shift(-1)**2 + 
-        spy['ret'].shift(-2)**2 + 
-        spy['ret'].shift(-3)**2 + 
-        spy['ret'].shift(-4)**2 + 
-        spy['ret'].shift(-5)**2
-    )
-    
-    return spy[['date', 'rv_5d']]
+def train_xgboost(train_df, hyperparams):
+	"""Fit XGBoost on the training subset and return model + metrics."""
+	feature_cols = [c for c in train_df.columns if c not in ["date", "rv_5d"]]
+	X_train = train_df[feature_cols].values
+	y_train = train_df["rv_5d"].values
+
+	params = hyperparams.copy()
+	params.setdefault("objective", "reg:squarederror")
+	params.setdefault("n_jobs", -1)
+	params.setdefault("eval_metric", "rmse")
+
+	model = XGBRegressor(**params)
+	model.fit(X_train, y_train, verbose=False)
+
+	preds = model.predict(X_train)
+	train_metrics = compute_metrics(y_train, preds)
+
+	return model, feature_cols, train_metrics
 
 
-def load_features():
-    """Load all computed features"""
-    features_path = DATA_FEATURES
-    files = list(features_path.glob("date=*/features.parquet"))
-    
-    if not files:
-        raise FileNotFoundError(f"No features found in {features_path}")
-    
-    print(f"Loading {len(files)} feature partitions...")
-    
-    # Load files with error handling for corrupted partitions
-    dfs = []
-    skipped = 0
-    for f in files:
-        try:
-            dfs.append(pd.read_parquet(f))
-        except Exception as e:
-            print(f"Warning: Skipping corrupted file {f.parent.name}/{f.name}: {str(e)[:50]}")
-            skipped += 1
-    
-    if skipped > 0:
-        print(f"Skipped {skipped} corrupted files")
-    
-    df = pd.concat(dfs, ignore_index=True)
-    df['date'] = pd.to_datetime(df['date'])
-    df = df.sort_values('date').reset_index(drop=True)
-    
-    return df
+def clear_prefix(storage, prefix):
+	"""Remove existing files under a storage prefix (e.g., data/models/latest/)."""
+	files = storage.list_files(prefix)
+	for path in files:
+		storage.delete(path)
 
 
-def prepare_dataset():
-    """Load features and labels, merge them, drop NaNs"""
-    print("\n" + "="*60)
-    print("Preparing Dataset")
-    print("="*60)
-    
-    # Load and compute labels
-    curated_df = load_curated_data()
-    labels_df = compute_rv_5d(curated_df)
-    print(f"Labels: {len(labels_df)} dates")
-    
-    # Load features
-    features_df = load_features()
-    print(f"Features: {len(features_df)} dates")
-    
-    # Merge
-    df = features_df.merge(labels_df, on='date', how='inner')
-    print(f"Merged: {len(df)} samples")
-    
-    # Drop NaNs
-    initial_len = len(df)
-    df = df.dropna()
-    dropped = initial_len - len(df)
-    if dropped > 0:
-        print(f"Dropped {dropped} rows with NaN values")
-    
-    print(f"Final dataset: {len(df)} samples from {df['date'].min().date()} to {df['date'].max().date()}")
-    
-    return df
+def save_model(storage, model_payload, trained_date):
+	"""Persist model to dated folder and latest folder."""
+	dated_prefix = f"{MODELS_ROOT}/date={trained_date}"
+	latest_prefix = f"{MODELS_ROOT}/latest"
+
+	clear_prefix(storage, f"{latest_prefix}/")
+
+	storage.write_pickle(model_payload, f"{dated_prefix}/xgboost.pkl")
+	storage.write_pickle(model_payload, f"{latest_prefix}/xgboost.pkl")
 
 
-def load_model_config():
-    """
-    Load stacking ensemble configuration from final_model/model_config.json
-    
-    Returns:
-        tuple: (config dict, benchmark dict)
-    """
-    if not MODEL_CONFIG.exists():
-        raise FileNotFoundError(
-            f"Model config not found at {MODEL_CONFIG}. "
-            f"Run notebook 2_model_selection.ipynb section 9 to export config."
-        )
-    
-    print(f"\nLoading model config from {MODEL_CONFIG}")
-    with open(MODEL_CONFIG) as f:
-        config = json.load(f)
-    
-    print(f"Model architecture: {config['model_architecture']}")
-    print(f"Base models: {[m['name'] for m in config['base_models']]}")
-    print(f"Meta learner: {config['meta_learner']['type']}")
-    
-    # Load benchmarks if available
-    benchmarks = None
-    if BENCHMARK_CONFIG.exists():
-        with open(BENCHMARK_CONFIG) as f:
-            benchmarks = json.load(f)
-        print(f"Expected val RMSE: {benchmarks['expected_performance']['val_rmse']:.6f}")
-    
-    return config, benchmarks
-
-
-def walk_forward_split(df, train_size=0.8):
-    """
-    Time-series aware train/validation split
-    
-    Uses expanding window: train on first 80%, validate on last 20%
-    Never use future data to predict the past!
-    """
-    df = df.sort_values('date').reset_index(drop=True)
-    
-    split_idx = int(len(df) * train_size)
-    
-    train = df.iloc[:split_idx].copy()
-    val = df.iloc[split_idx:].copy()
-    
-    print(f"\nTrain/Validation Split:")
-    print(f"  Train: {len(train)} rows ({train['date'].min().date()} to {train['date'].max().date()})")
-    print(f"  Val:   {len(val)} rows ({val['date'].min().date()} to {val['date'].max().date()})")
-    
-    return train, val
-
-
-def train_ensemble(X_train, y_train, X_val, y_val, config, model_name):
-    """
-    Train stacking ensemble with XGBoost, LightGBM, and Ridge meta-learner
-    
-    Args:
-        X_train: Training features
-        y_train: Training labels
-        X_val: Validation features (can be None)
-        y_val: Validation labels (can be None)
-        config: Model configuration dict
-        model_name: Name for logging (e.g. "model A 90pct")
-    
-    Returns:
-        dict with models, metrics, and predictions
-    """
-    print("\n" + "="*60)
-    print(f"Training {model_name}")
-    print("="*60)
-    
-    # Step 1: Train XGBoost
-    print("\n" + "-"*60)
-    print("Training XGBoost")
-    print("-"*60)
-    
-    xgb_config = config['base_models'][0]
-    xgb_params = xgb_config['params'].copy()
-    
-    xgb_model = xgb.XGBRegressor(**xgb_params)
-    if X_val is not None:
-        xgb_model.fit(
-            X_train, y_train,
-            eval_set=[(X_train, y_train), (X_val, y_val)],
-            verbose=False
-        )
-    else:
-        xgb_model.fit(X_train, y_train, verbose=False)
-    
-    xgb_train_pred = xgb_model.predict(X_train)
-    train_rmse_xgb = np.sqrt(mean_squared_error(y_train, xgb_train_pred))
-    print(f"train rmse: {train_rmse_xgb:.6f}")
-    
-    val_rmse_xgb = None
-    xgb_val_pred = None
-    if X_val is not None:
-        xgb_val_pred = xgb_model.predict(X_val)
-        val_rmse_xgb = np.sqrt(mean_squared_error(y_val, xgb_val_pred))
-        print(f"val rmse: {val_rmse_xgb:.6f}")
-    
-    # Step 2: Train LightGBM
-    print("\n" + "-"*60)
-    print("Training LightGBM")
-    print("-"*60)
-    
-    lgbm_config = config['base_models'][1]
-    lgbm_params = lgbm_config['params'].copy()
-    
-    lgbm_model = lgb.LGBMRegressor(**lgbm_params)
-    if X_val is not None:
-        lgbm_model.fit(
-            X_train, y_train,
-            eval_set=[(X_train, y_train), (X_val, y_val)],
-            callbacks=[lgb.log_evaluation(0)]
-        )
-    else:
-        lgbm_model.fit(X_train, y_train, callbacks=[lgb.log_evaluation(0)])
-    
-    lgbm_train_pred = lgbm_model.predict(X_train)
-    train_rmse_lgbm = np.sqrt(mean_squared_error(y_train, lgbm_train_pred))
-    print(f"train rmse: {train_rmse_lgbm:.6f}")
-    
-    val_rmse_lgbm = None
-    lgbm_val_pred = None
-    if X_val is not None:
-        lgbm_val_pred = lgbm_model.predict(X_val)
-        val_rmse_lgbm = np.sqrt(mean_squared_error(y_val, lgbm_val_pred))
-        print(f"Val RMSE:   {val_rmse_lgbm:.6f}")
-    
-    # Step 3: Train Meta-Learner (Ridge)
-    print("\n" + "-"*60)
-    print("Training Meta-Learner (Ridge)")
-    print("-"*60)
-    
-    meta_config = config['meta_learner']
-    meta_params = meta_config['params'].copy()
-    print(f"Alpha: {meta_params['alpha']}")
-    
-    # Stack base predictions
-    X_meta_train = np.column_stack([xgb_train_pred, lgbm_train_pred])
-    
-    meta_model = Ridge(**meta_params)
-    meta_model.fit(X_meta_train, y_train)
-    
-    # Final ensemble predictions
-    ensemble_train_pred = meta_model.predict(X_meta_train)
-    
-    train_metrics = {
-        'rmse': np.sqrt(mean_squared_error(y_train, ensemble_train_pred)),
-        'mae': mean_absolute_error(y_train, ensemble_train_pred),
-        'r2': r2_score(y_train, ensemble_train_pred)
-    }
-    
-    print(f"\n{model_name} Training Performance:")
-    print(f"  RMSE: {train_metrics['rmse']:.6f}")
-    print(f"  MAE:  {train_metrics['mae']:.6f}")
-    print(f"  R²:   {train_metrics['r2']:.4f}")
-    
-    val_metrics = None
-    ensemble_val_pred = None
-    
-    if X_val is not None:
-        X_meta_val = np.column_stack([xgb_val_pred, lgbm_val_pred])
-        ensemble_val_pred = meta_model.predict(X_meta_val)
-        
-        val_metrics = {
-            'rmse': np.sqrt(mean_squared_error(y_val, ensemble_val_pred)),
-            'mae': mean_absolute_error(y_val, ensemble_val_pred),
-            'r2': r2_score(y_val, ensemble_val_pred)
-        }
-        
-        print(f"\n{model_name} validation performance")
-        print(f"rmse {val_metrics['rmse']:.6f} mae {val_metrics['mae']:.6f} r2 {val_metrics['r2']:.4f}")
-        
-        # Improvement vs base models
-        xgb_improvement = ((val_rmse_xgb - val_metrics['rmse']) / val_rmse_xgb) * 100
-        lgbm_improvement = ((val_rmse_lgbm - val_metrics['rmse']) / val_rmse_lgbm) * 100
-        
-        print(f"\nimprovement over base models")
-        print(f"vs xgboost {xgb_improvement:+.2f}% vs lightgbm {lgbm_improvement:+.2f}%")
-    
-    return {
-        'xgb_model': xgb_model,
-        'lgbm_model': lgbm_model,
-        'meta_model': meta_model,
-        'train_metrics': train_metrics,
-        'val_metrics': val_metrics,
-        'train_pred': ensemble_train_pred,
-        'val_pred': ensemble_val_pred,
-        'xgb_train_rmse': train_rmse_xgb,
-        'xgb_val_rmse': val_rmse_xgb,
-        'lgbm_train_rmse': train_rmse_lgbm,
-        'lgbm_val_rmse': val_rmse_lgbm
-    }
-
-
-def save_models(models, feature_cols, split_name):
-    """
-    Save all models separately (xgboost, lightgbm, ensemble) in date-based folders
-    
-    Args:
-        models: dict with 'xgb_model', 'lgbm_model', 'meta_model'
-        feature_cols: list of feature names
-        split_name: '90pct' or '100pct'
-    """
-    training_date = get_training_date()
-    date_folder = f"{MODELS_DIR}/date={training_date}"
-    os.makedirs(date_folder, exist_ok=True)
-    
-    # Save individual base models
-    xgb_artifact = {
-        'model': models['xgb_model'],
-        'feature_cols': feature_cols
-    }
-    xgb_path = f"{date_folder}/xgboost_{split_name}.pkl"
-    storage.write_pickle(xgb_artifact, xgb_path)
-    print(f"saved {xgb_path}")
-    
-    lgbm_artifact = {
-        'model': models['lgbm_model'],
-        'feature_cols': feature_cols
-    }
-    lgbm_path = f"{date_folder}/lightgbm_{split_name}.pkl"
-    storage.write_pickle(lgbm_artifact, lgbm_path)
-    print(f"saved {lgbm_path}")
-    
-    # Save ensemble (all 3 models together)
-    ensemble_artifact = {
-        'xgb_model': models['xgb_model'],
-        'lgbm_model': models['lgbm_model'],
-        'meta_model': models['meta_model'],
-        'feature_cols': feature_cols
-    }
-    ensemble_path = f"{date_folder}/ensemble_{split_name}.pkl"
-    storage.write_pickle(ensemble_artifact, ensemble_path)
-    print(f"saved {ensemble_path}")
-    
-    # Also save to "latest" for easy access
-    latest_folder = f"{MODELS_DIR}/latest"
-    os.makedirs(latest_folder, exist_ok=True)
-    
-    storage.write_pickle(xgb_artifact, f"{latest_folder}/xgboost_{split_name}.pkl")
-    storage.write_pickle(lgbm_artifact, f"{latest_folder}/lightgbm_{split_name}.pkl")
-    storage.write_pickle(ensemble_artifact, f"{latest_folder}/ensemble_{split_name}.pkl")
-    
-    print(f"also saved to {latest_folder}/ for easy access")
+def append_train_history(storage, entry):
+	storage.append_jsonl(entry, TRAIN_HISTORY)
 
 
 def main():
-    print("\n" + "="*70)
-    print("Volatility Forecasting - Dual Model Training")
-    print("="*70)
-    
-    # Load model configuration
-    config, benchmarks = load_model_config()
-    
-    # Prepare dataset
-    df = prepare_dataset()
-    
-    # Time-series split for model A (90%)
-    train_df, val_df = walk_forward_split(df, train_size=0.8)
-    
-    # Extract features and labels
-    feature_cols = [c for c in train_df.columns if c not in ['date', 'rv_5d']]
-    X_train = train_df[feature_cols].values
-    y_train = train_df['rv_5d'].values
-    X_val = val_df[feature_cols].values
-    y_val = val_df['rv_5d'].values
-    
-    # Also prepare full dataset for model B
-    X_full = df[feature_cols].values
-    y_full = df['rv_5d'].values
-    
-    print(f"\n{len(feature_cols)} features: {feature_cols[:5]}... (showing first 5)")
-    
-    # ========================================
-    # MODEL A: 90% SPLIT (TRUE VALIDATION)
-    # ========================================
-    print("\n" + "="*70)
-    print("MODEL A: Training on 90% with validation baseline")
-    print("="*70)
-    
-    model_90pct = train_ensemble(X_train, y_train, X_val, y_val, config, "model A 90pct")
-    
-    # Save model A
-    save_models(model_90pct, feature_cols, "90pct")
-    
-    # Prepare date ranges for validation history
-    date_ranges_90pct = {
-        "training_start_date": str(train_df["date"].min().date()),
-        "training_end_date": str(train_df["date"].max().date()),
-        "val_start_date": str(val_df["date"].min().date()),
-        "val_end_date": str(val_df["date"].max().date())
-    }
-    
-    # Log validation history for each model
-    xgb_importance = dict(zip(feature_cols, model_90pct["xgb_model"].feature_importances_))
-    lgbm_importance = dict(zip(feature_cols, model_90pct["lgbm_model"].feature_importances_))
-    
-    append_validation_history(
-        "xgboost_90pct",
-        {
-            "train_rmse": model_90pct["xgb_train_rmse"],
-            "val_rmse": model_90pct["xgb_val_rmse"],
-            "train_samples": len(X_train),
-            "val_samples": len(X_val)
-        },
-        xgb_importance,
-        date_ranges_90pct
-    )
-    
-    append_validation_history(
-        "lightgbm_90pct",
-        {
-            "train_rmse": model_90pct["lgbm_train_rmse"],
-            "val_rmse": model_90pct["lgbm_val_rmse"],
-            "train_samples": len(X_train),
-            "val_samples": len(X_val)
-        },
-        lgbm_importance,
-        date_ranges_90pct
-    )
-    
-    append_validation_history(
-        "ensemble_90pct",
-        {
-            **model_90pct["train_metrics"],
-            **{f"val_{k}": v for k, v in model_90pct["val_metrics"].items()},
-            "train_samples": len(X_train),
-            "val_samples": len(X_val)
-        },
-        None,
-        date_ranges_90pct
-    )
-    
-    # ========================================
-    # MODEL B: 100% SPLIT (HOLDOUT OR FULL)
-    # ========================================
-    print("\n" + "="*70)
-    print("MODEL B: Training on all data with holdout testing")
-    print("="*70)
-    
-    # Check if we have enough data to hold out last 30 days
-    if len(df) > HOLDOUT_SAMPLES:
-        print(f"\nDataset has {len(df)} samples, holding out last {HOLDOUT_SAMPLES}")
-        
-        # Train on all data minus last 30
-        train_b_df = df.iloc[:-HOLDOUT_SAMPLES].copy()
-        test_b_df = df.iloc[-HOLDOUT_SAMPLES:].copy()
-        
-        X_train_b = train_b_df[feature_cols].values
-        y_train_b = train_b_df['rv_5d'].values
-        X_test_b = test_b_df[feature_cols].values
-        y_test_b = test_b_df['rv_5d'].values
-        
-        print(f"training {len(train_b_df)} samples from {train_b_df['date'].min().date()} to {train_b_df['date'].max().date()}")
-        print(f"testing {len(test_b_df)} samples from {test_b_df['date'].min().date()} to {test_b_df['date'].max().date()}")
-        
-        # Train model B with test set for validation metrics
-        model_100pct = train_ensemble(X_train_b, y_train_b, X_test_b, y_test_b, config, "model B all-30")
-        
-        # Save model B
-        save_models(model_100pct, feature_cols, "100pct")
-        
-        # Prepare date ranges for validation history
-        date_ranges_100pct = {
-            "training_start_date": str(train_b_df["date"].min().date()),
-            "training_end_date": str(train_b_df["date"].max().date()),
-            "val_start_date": str(test_b_df["date"].min().date()),
-            "val_end_date": str(test_b_df["date"].max().date())
-        }
-        
-        # Log validation history for each model (trained on all-30)
-        xgb_importance = dict(zip(feature_cols, model_100pct["xgb_model"].feature_importances_))
-        lgbm_importance = dict(zip(feature_cols, model_100pct["lgbm_model"].feature_importances_))
-        
-        append_validation_history(
-            "xgboost_100pct",
-            {
-                "train_rmse": model_100pct["xgb_train_rmse"],
-                "val_rmse": model_100pct["xgb_val_rmse"],
-                "train_samples": len(X_train_b),
-                "val_samples": len(X_test_b)
-            },
-            xgb_importance,
-            date_ranges_100pct
-        )
-        
-        append_validation_history(
-            "lightgbm_100pct",
-            {
-                "train_rmse": model_100pct["lgbm_train_rmse"],
-                "val_rmse": model_100pct["lgbm_val_rmse"],
-                "train_samples": len(X_train_b),
-                "val_samples": len(X_test_b)
-            },
-            lgbm_importance,
-            date_ranges_100pct
-        )
-        
-        append_validation_history(
-            "ensemble_100pct",
-            {
-                **model_100pct["train_metrics"],
-                **{f"val_{k}": v for k, v in model_100pct["val_metrics"].items()},
-                "train_samples": len(X_train_b),
-                "val_samples": len(X_test_b)
-            },
-            None,
-            date_ranges_100pct
-        )
-        
-        # Model B eval metrics (true out-of-sample on last 30)
-        print(f"\nmodel B all-30 on last 30 samples (true out-of-sample)")
-        print(f"rmse {model_100pct['val_metrics']['rmse']:.6f} mae {model_100pct['val_metrics']['mae']:.6f} r2 {model_100pct['val_metrics']['r2']:.4f}")
-        print(f"note: these are TRUE out-of-sample metrics, model never saw this data")
-        
-    else:
-        print(f"\nwarning: dataset too small {len(df)} samples to hold out {HOLDOUT_SAMPLES}")
-        print(f"training model B on 100pct data instead")
-        
-        model_100pct = train_ensemble(X_full, y_full, None, None, config, "model B 100pct")
-        save_models(model_100pct, feature_cols, "100pct")
-        
-        # Prepare date ranges for validation history (using full dataset)
-        full_df = pd.concat([train_df, val_df])
-        date_ranges_100pct = {
-            "training_start_date": str(full_df["date"].min().date()),
-            "training_end_date": str(full_df["date"].max().date()),
-            "val_start_date": None,  # No validation set in this case
-            "val_end_date": None
-        }
-        
-        # Log validation history for each model (trained on full data)
-        xgb_importance = dict(zip(feature_cols, model_100pct["xgb_model"].feature_importances_))
-        lgbm_importance = dict(zip(feature_cols, model_100pct["lgbm_model"].feature_importances_))
-        
-        append_validation_history(
-            "xgboost_100pct",
-            {
-                "train_rmse": model_100pct["xgb_train_rmse"],
-                "val_rmse": None,  # No validation set
-                "train_samples": len(X_full),
-                "val_samples": 0
-            },
-            xgb_importance,
-            date_ranges_100pct
-        )
-        
-        append_validation_history(
-            "lightgbm_100pct",
-            {
-                "train_rmse": model_100pct["lgbm_train_rmse"],
-                "val_rmse": None,  # No validation set
-                "train_samples": len(X_full),
-                "val_samples": 0
-            },
-            lgbm_importance,
-            date_ranges_100pct
-        )
-        
-        append_validation_history(
-            "ensemble_100pct",
-            {
-                **model_100pct["train_metrics"],
-                "val_rmse": None,
-                "val_mae": None,
-                "val_r2": None,
-                "train_samples": len(X_full),
-                "val_samples": 0
-            },
-            None,
-            date_ranges_100pct
-        )
-        
-        # Eval on validation set (insample for model B)
-        X_meta_val_b = np.column_stack([
-            model_100pct['xgb_model'].predict(X_val),
-            model_100pct['lgbm_model'].predict(X_val)
-        ])
-        y_pred_val_b = model_100pct['meta_model'].predict(X_meta_val_b)
-        
-        val_rmse_b = np.sqrt(mean_squared_error(y_val, y_pred_val_b))
-        val_mae_b = mean_absolute_error(y_val, y_pred_val_b)
-        val_r2_b = r2_score(y_val, y_pred_val_b)
-    
-    # Append training history (only dates)
-    append_training_history(train_df, val_df)
-    
-    # Summary
-    print("\n" + "="*70)
-    print("Training Complete - Dual Model Strategy")
-    print("="*70)
-    print(f"\nmodel A 90pct (out-of-sample validation)")
-    print(f"training {len(X_train)} validation {len(X_val)}")
-    print(f"val_rmse {model_90pct['val_metrics']['rmse']:.6f} (true validation)")
-    
-    if len(df) > HOLDOUT_SAMPLES:
-        print(f"\nmodel B all-30 (holdout for testing)")
-        print(f"training {len(train_b_df)} testing {len(test_b_df)}")
-        print(f"test_rmse {model_100pct['val_metrics']['rmse']:.6f} (true out-of-sample)")
-    else:
-        print(f"\nmodel B 100pct (all data)")
-        print(f"training {len(df)}")
-        print(f"val_rmse {val_rmse_b:.6f} (insample)")
-    
-    print(f"\nartifacts saved")
-    print(f"data/models/date={get_training_date()}/xgboost_90pct.pkl")
-    print(f"data/models/date={get_training_date()}/lightgbm_90pct.pkl")
-    print(f"data/models/date={get_training_date()}/ensemble_90pct.pkl")
-    print(f"data/models/date={get_training_date()}/xgboost_100pct.pkl")
-    print(f"data/models/date={get_training_date()}/lightgbm_100pct.pkl")
-    print(f"data/models/date={get_training_date()}/ensemble_100pct.pkl")
-    print(f"data/models/latest/ (all 6 models)")
-    print(f"data/train/training_history.jsonl")
-    print(f"data/train/validation/ (10 JSON files)")
-    
-    print("="*70)
+	print("=" * 60)
+	print("Training Service (XGBoost)")
+	print("=" * 60)
+
+	storage = get_storage()
+	model_name, hyperparams = load_model_config(storage)
+	print(f"model_name: {model_name}")
+	print(f"hyperparameters: {list(hyperparams.keys())}")
+
+	df = load_dataset(storage)
+	if len(df) <= 30:
+		raise ValueError("master_dataset must have more than 30 rows to train.")
+
+	train_df = df.iloc[:-30].copy()
+	print(f"train rows: {len(train_df)}")
+	print(f"train date range: {train_df['date'].min().date()} to {train_df['date'].max().date()}")
+
+	model, feature_cols, train_metrics = train_xgboost(train_df, hyperparams)
+
+	trained_date = datetime.utcnow().strftime("%Y-%m-%d")
+	model_payload = {
+		"model_name": model_name,
+		"model": model,
+		"feature_cols": feature_cols,
+		"hyperparams": hyperparams,
+		"trained_at": trained_date
+	}
+
+	save_model(storage, model_payload, trained_date)
+
+	history_entry = {
+		"training_date": trained_date,
+		"data_start_date": train_df["date"].min().strftime("%Y-%m-%d"),
+		"data_end_date": train_df["date"].max().strftime("%Y-%m-%d"),
+		"model_name": model_name,
+		"train_rmse": train_metrics["rmse"],
+		"train_mae": train_metrics["mae"],
+		"train_r2": train_metrics["r2"],
+		"train_rows": len(train_df)
+	}
+	append_train_history(storage, history_entry)
+
+	print("\ntrain metrics:")
+	print(f"  rmse: {train_metrics['rmse']:.6f}")
+	print(f"  mae:  {train_metrics['mae']:.6f}")
+	print(f"  r2:   {train_metrics['r2']:.4f}")
+
+	print("\nSaved:")
+	print(f"  model (dated): {MODELS_ROOT}/date={trained_date}/xgboost.pkl")
+	print(f"  model (latest): {MODELS_ROOT}/latest/xgboost.pkl")
+	print(f"  history: {TRAIN_HISTORY}")
 
 
 if __name__ == "__main__":
-    main()
+	main()

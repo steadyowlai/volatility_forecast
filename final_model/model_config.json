@@ -1,95 +1,16 @@
 {
-  "version": "1.0.0",
-  "created_date": "2026-01-07",
-  "model_architecture": "stacking_ensemble",
-  "description": "Stacking ensemble combining XGBoost and LightGBM with Ridge meta-learner",
-  "base_models": [
-    {
-      "name": "xgboost",
-      "type": "XGBRegressor",
-      "params": {
-        "max_depth": 3,
-        "learning_rate": 0.01,
-        "n_estimators": 564,
-        "subsample": 0.7,
-        "colsample_bytree": 0.7,
-        "reg_alpha": 0,
-        "reg_lambda": 5,
-        "random_state": 42,
-        "n_jobs": -1
-      },
-      "early_stopping": {
-        "enabled": true,
-        "rounds": 50,
-        "metric": "rmse",
-        "best_iteration": 564
-      }
-    },
-    {
-      "name": "lightgbm",
-      "type": "LGBMRegressor",
-      "params": {
-        "max_depth": 5,
-        "learning_rate": 0.005,
-        "n_estimators": 525,
-        "num_leaves": 21,
-        "min_child_samples": 20,
-        "subsample": 0.7,
-        "colsample_bytree": 0.7,
-        "reg_alpha": 0,
-        "reg_lambda": 2,
-        "random_state": 42,
-        "n_jobs": -1,
-        "verbose": -1
-      },
-      "early_stopping": {
-        "enabled": true,
-        "rounds": 50,
-        "metric": "rmse",
-        "best_iteration": 525
-      }
-    }
-  ],
-  "meta_learner": {
-    "type": "Ridge",
-    "params": {
-      "alpha": 0.001,
-      "random_state": 42
-    }
-  },
-  "training": {
-  "train_val_split": 0.8,
-    "split_method": "time_series_chronological",
-    "n_features": 20,
-    "early_stopping": {
-      "xgboost": {
-        "enabled": true,
-        "rounds": 50,
-        "metric": "rmse",
-        "best_iteration": 564
-      },
-      "lightgbm": {
-        "enabled": true,
-        "rounds": 50,
-        "metric": "rmse",
-        "best_iteration": 525
-      }
-    },
-    "stacking": {
-      "architecture": "stacking_ensemble",
-      "base_models": [
-        "xgboost",
-        "lightgbm"
-      ],
-      "meta_features": [
-        "xgboost_pred",
-        "lightgbm_pred"
-      ],
-      "meta_learner": "Ridge",
-      "meta_params": {
-        "alpha": 0.001,
-        "random_state": 42
-      }
+  "timestamp": "2026-02-03T23:19:53.919523Z",
+  "hyperparams": {
+    "model_name": "xgb_tuned",
+    "hyperparams": {
+      "colsample_bytree": 0.7,
+      "gamma": 0,
+      "learning_rate": 0.03,
+      "max_depth": 3,
+      "min_child_weight": 4,
+      "n_estimators": 300,
+      "reg_lambda": 1.5,
+      "subsample": 0.8
     }
   }
 }
