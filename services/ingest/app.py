@@ -1,4 +1,5 @@
 import os
+import json
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -6,7 +7,6 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 from schemas import raw_market_schema, curated_market_daily_schema
-from data_status import get_last_date
 
 # Configuration
 DATA_RAW = Path("data/raw.market")
@@ -46,25 +46,41 @@ def get_existing_dates(data_dir: Path) -> list:
     
     return sorted(dates)
 
+def get_manifest_dates(manifest_path: Path) -> list:
+    """Read dates from manifest file."""
+    if not manifest_path.exists():
+        return []
+    
+    try:
+        with open(manifest_path, 'r') as f:
+            data = json.load(f)
+        return data.get('dates', [])
+    except Exception as e:
+        print(f"warning: could not read manifest: {e}")
+        return []
+
+
 def determine_download_range(data_dir: Path, default_start: str) -> tuple:
     """
     Figure out what date range to download.
     
-    Priority:
-    1. Check data_status.json for last_date (from master_dataset)
-    2. Check master_dataset.parquet (fallback)
-    3. Check curated.market/ partitions (local dev fallback)
-    4. Full historical download from default_start
+    Source of truth: curated.market/_manifest.json
+    
+    1. Check curated manifest for last date
+    2. If no manifest, scan partitions
+    3. If no data, download full history from default_start
     
     Returns: (start_date, end_date, is_incremental)
     """
     end_date = datetime.now().date()
     
-    # Priority 1: Check data_status.json
-    last_date_str = get_last_date()
-    if last_date_str:
-        last_date = pd.to_datetime(last_date_str).date()
-        print(f"found last_date in data_status.json: {last_date}")
+    # Priority 1: Check curated manifest
+    manifest_path = data_dir / "_manifest.json"
+    manifest_dates = get_manifest_dates(manifest_path)
+    
+    if manifest_dates:
+        last_date = pd.to_datetime(max(manifest_dates)).date()
+        print(f"found last date in curated manifest: {last_date}")
         start_date = last_date + timedelta(days=1)
         
         if start_date >= end_date:
@@ -75,33 +91,12 @@ def determine_download_range(data_dir: Path, default_start: str) -> tuple:
         print(f"will download {days_to_download} days from {start_date} to {end_date}")
         return start_date, end_date, True
     
-    # Priority 2: Check master_dataset.parquet
-    if MASTER_DATASET.exists():
-        try:
-            print("data_status.json not found, checking master_dataset.parquet...")
-            df = pd.read_parquet(MASTER_DATASET, columns=['date'])
-            last_date = pd.to_datetime(df['date']).max().date()
-            print(f"found last date in master_dataset: {last_date}")
-            start_date = last_date + timedelta(days=1)
-            
-            if start_date >= end_date:
-                print(f"already up to date, nothing to download")
-                return None, None, True
-            
-            days_to_download = (end_date - start_date).days
-            print(f"will download {days_to_download} days from {start_date} to {end_date}")
-            return start_date, end_date, True
-        except Exception as e:
-            print(f"warning: could not read master_dataset.parquet: {e}")
-            # Fall through to next priority
-    
-    # Priority 3: Check existing curated.market partitions (local dev)
+    # Priority 2: Check existing curated.market partitions (fallback if manifest missing)
     existing_dates = get_existing_dates(data_dir)
     
     if existing_dates:
-        # We have existing data, download only new stuff
         last_date = max(existing_dates)
-        print(f"data_status.json and master_dataset not found, checking curated.market/")
+        print(f"manifest not found, scanned curated.market/ partitions")
         print(f"found existing data up to {last_date}")
         start_date = last_date + timedelta(days=1)
         
@@ -113,9 +108,9 @@ def determine_download_range(data_dir: Path, default_start: str) -> tuple:
         print(f"will download {days_to_download} days from {start_date} to {end_date}")
         return start_date, end_date, True
     
-    # Priority 4: No existing data, download full history
+    # Priority 3: No existing data, download full history
     start_date = pd.to_datetime(default_start).date()
-    print(f"no existing data found")
+    print(f"no existing curated data found")
     print(f"will download full history from {start_date}")
     return start_date, end_date, False
 
@@ -169,7 +164,7 @@ def build_raw(df_all: pd.DataFrame) -> pd.DataFrame:
     
     return raw
   
-def build_curated(df_all: pd.DataFrame) -> pd.DataFrame:
+def build_curated(df_all: pd.DataFrame, is_incremental: bool = False) -> pd.DataFrame:
     """
     Build curated.market.daily view:
     symbol, date, close, adj_close, ret
@@ -187,16 +182,42 @@ def build_curated(df_all: pd.DataFrame) -> pd.DataFrame:
           - Standard in quantitative finance
     
     To convert to simple returns: simple_ret = exp(ret) - 1
+    
+    Args:
+        df_all: Downloaded market data
+        is_incremental: If True, load previous day's data to compute first return
     """
     
     df = df_all.copy()
     df["date"] = pd.to_datetime(df["date"])
     df["adj_close"] = df["adj close"]
     
+    # If incremental, load last date from curated manifest for return calculation
+    if is_incremental:
+        manifest_dates = get_manifest_dates(DATA_CURATED / "_manifest.json")
+        if manifest_dates:
+            last_date_str = max(manifest_dates)
+            prev_file = DATA_CURATED / f"date={last_date_str}" / "daily.parquet"
+            
+            if prev_file.exists():
+                try:
+                    prev_df = pd.read_parquet(prev_file)
+                    prev_df["date"] = pd.to_datetime(prev_df["date"])
+                    # Append previous day's data to compute returns correctly
+                    df = pd.concat([prev_df, df], ignore_index=True)
+                    print(f"  loaded previous date ({last_date_str}) for return calculation")
+                except Exception as e:
+                    print(f"  warning: could not load previous date for returns: {e}")
+    
     df = df.sort_values(["symbol", "date"])
     
     # Compute log returns (canonical)
     df["ret"] = np.log(df["adj_close"] / df.groupby("symbol")["adj_close"].shift(1))
+    
+    # If we loaded previous data, filter to only new dates
+    if is_incremental:
+        min_new_date = pd.to_datetime(df_all["date"]).min()
+        df = df[df["date"] >= min_new_date]
     
     curated = df[["symbol", "date", "close", "adj_close", "ret"]].copy()
     
@@ -218,15 +239,43 @@ def write_partitions(df: pd.DataFrame, root: Path, fname: str) -> None:
         g.to_parquet(outpath, index=False)
 
 
+def update_manifest(root: Path, new_dates: list) -> None:
+    """Write a date manifest to avoid full directory scans."""
+    manifest_path = root / "_manifest.json"
+    # Use on-disk partitions as the authoritative source for completeness
+    disk_dates = [d.strftime("%Y-%m-%d") for d in get_existing_dates(root)]
+    existing_dates = []
+
+    if manifest_path.exists():
+        try:
+            with open(manifest_path, "r") as f:
+                payload = json.load(f)
+            existing_dates = payload.get("dates", [])
+        except Exception:
+            existing_dates = []
+
+    merged = sorted(set(existing_dates) | set(disk_dates) | set(new_dates))
+    payload = {
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "dates": merged
+    }
+
+    with open(manifest_path, "w") as f:
+        json.dump(payload, f, indent=2)
+
+
 def main():
     print("Market Data Ingestion Service")
     print("="*60)
     
     #check what dates we already have
+    existing_dates = get_existing_dates(DATA_CURATED)
     start_date, end_date, is_incremental = determine_download_range(DATA_CURATED, START_DATE)
     
     #if already up to date, exit early
     if start_date is None:
+        if existing_dates:
+            update_manifest(DATA_CURATED, [d.strftime("%Y-%m-%d") for d in existing_dates])
         print("ingestion complete (already up to date)")
         return
     
@@ -260,13 +309,17 @@ def main():
     
     #build curated
     print("\nbuilding curated.market.daily...")
-    curated = build_curated(all_data)
+    curated = build_curated(all_data, is_incremental=is_incremental)
     
     print("validating curated.market.daily schema...")
     curated_market_daily_schema.validate(curated)
     
     print("writing curated.market.daily partitions...")
     write_partitions(curated, DATA_CURATED, "daily")
+
+    curated_dates = sorted(pd.to_datetime(curated["date"]).dt.strftime("%Y-%m-%d").unique())
+    all_dates = [d.strftime("%Y-%m-%d") for d in existing_dates] + curated_dates
+    update_manifest(DATA_CURATED, all_dates)
     
     print("ingestion complete.")
     

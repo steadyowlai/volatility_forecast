@@ -125,6 +125,7 @@ class Storage:
             local_path = self._get_local_path(path)
             local_path.parent.mkdir(parents=True, exist_ok=True)
             df.to_parquet(local_path, index=False)
+
     
     def read_json(self, path: str) -> Dict[str, Any]:
         """

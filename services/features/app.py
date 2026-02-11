@@ -6,19 +6,40 @@ Implements all features from local/docs/scope/Level 1 Features.md
 Incremental processing: Only computes features for new dates not yet in features.L1/
 """
 
+import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from data_status import get_last_date
+from validate_features import validate_feature_partition, validate_features_batch
+
+CURATED_MANIFEST = Path("data/curated.market/_manifest.json")
+FEATURES_MANIFEST = Path("data/features.L1/_manifest.json")
+
+
+def get_manifest_dates(manifest_path: Path) -> list:
+    if not manifest_path.exists():
+        return []
+
+    try:
+        with open(manifest_path, "r") as f:
+            payload = json.load(f)
+        return payload.get("dates", [])
+    except Exception:
+        return []
 
 
 def get_available_curated_dates():
     """Get all dates that have curated data"""
+    manifest_dates = get_manifest_dates(CURATED_MANIFEST)
+    if manifest_dates:
+        return sorted([pd.to_datetime(d).date() for d in manifest_dates])
+
     curated_path = Path("data/curated.market")
     files = list(curated_path.glob("date=*/daily.parquet"))
-    
+
     dates = []
     for f in files:
         date_str = f.parent.name.replace("date=", "")
@@ -26,18 +47,42 @@ def get_available_curated_dates():
             dates.append(pd.to_datetime(date_str).date())
         except:
             pass
-    
+
     return sorted(dates)
 
 
 def get_existing_feature_dates():
     """Get dates that already have features computed"""
+    manifest_dates = get_manifest_dates(FEATURES_MANIFEST)
+    if manifest_dates:
+        manifest_parsed = sorted([pd.to_datetime(d).date() for d in manifest_dates])
+        features_path = Path("data/features.L1")
+        if features_path.exists():
+            files = list(features_path.glob("date=*/features.parquet"))
+            disk_dates = []
+            for f in files:
+                date_str = f.parent.name.replace("date=", "")
+                try:
+                    disk_dates.append(pd.to_datetime(date_str).date())
+                except:
+                    pass
+            disk_dates = sorted(set(disk_dates))
+            if disk_dates and (len(disk_dates) > len(manifest_parsed) or min(disk_dates) < min(manifest_parsed)):
+                payload = {
+                    "updated_at": datetime.utcnow().isoformat() + "Z",
+                    "dates": [d.strftime("%Y-%m-%d") for d in disk_dates]
+                }
+                with open(FEATURES_MANIFEST, "w") as f:
+                    json.dump(payload, f, indent=2)
+                return disk_dates
+        return manifest_parsed
+
     features_path = Path("data/features.L1")
     if not features_path.exists():
         return []
-    
+
     files = list(features_path.glob("date=*/features.parquet"))
-    
+
     dates = []
     for f in files:
         date_str = f.parent.name.replace("date=", "")
@@ -45,93 +90,36 @@ def get_existing_feature_dates():
             dates.append(pd.to_datetime(date_str).date())
         except:
             pass
-    
+
     return sorted(dates)
 
 
 def determine_dates_to_process():
     """
     Determine which dates need feature computation.
-    
-    Logic:
-    1. Find last date in master_dataset (from JSON or parquet file)
-    2. Find last date with features (from features.L1/)
-    3. Process the gap between them
-    
-    If no master_dataset exists, process all curated data (first run).
-    
-    Returns:
-        tuple: (dates_to_process, is_full_rebuild)
+
+    Uses manifest dates to compute missing feature partitions.
     """
-    from datetime import timedelta
-    
-    # Step 1: Find last date in master_dataset
-    last_master_date = None
-    last_master_date_str = get_last_date()
-    
-    if last_master_date_str:
-        # Priority 1: Read from data_status.json (fast)
-        last_master_date = pd.to_datetime(last_master_date_str).date()
-        print(f"found last_date in data_status.json: {last_master_date}")
-    else:
-        # Priority 2: Read master_dataset.parquet (slower)
-        master_path = Path("data/master_dataset.parquet")
-        if master_path.exists():
-            try:
-                print("data_status.json not found, reading master_dataset.parquet...")
-                master_df = pd.read_parquet(master_path)
-                if not master_df.empty:
-                    last_master_date = pd.to_datetime(master_df['date']).max().date()
-                    print(f"found last date in master_dataset.parquet: {last_master_date}")
-            except Exception as e:
-                print(f"warning: could not read master_dataset.parquet: {e}")
-    
-    # If no master_dataset exists, this is a first run
-    if last_master_date is None:
-        print("no master_dataset found - will process all curated data (first run)")
-        available_dates = get_available_curated_dates()
-        if not available_dates:
-            print("ERROR: No curated data available")
-            return [], False
-        print(f"  date range: {available_dates[0]} to {available_dates[-1]}")
-        return available_dates, True
-    
-    # Step 2: Find last date with features
-    last_feature_date = None
-    existing_dates = get_existing_feature_dates()
-    
-    if existing_dates:
-        last_feature_date = max(existing_dates)
-        print(f"found last date in features.L1/: {last_feature_date}")
+    curated_dates = get_available_curated_dates()
+    if not curated_dates:
+        print("ERROR: No curated data available")
+        return [], False
+
+    feature_dates = get_existing_feature_dates()
+    if feature_dates:
+        print(f"found last date in features.L1/: {max(feature_dates)}")
     else:
         print("no existing features found")
-    
-    # Step 3: Determine what to process
-    if last_feature_date is None:
-        # Features don't exist - need to process everything in master_dataset
-        print("will process all dates from master_dataset")
-        master_path = Path("data/master_dataset.parquet")
-        master_df = pd.read_parquet(master_path)
-        all_dates = sorted(pd.to_datetime(master_df['date']).dt.date.unique())
-        print(f"  date range: {all_dates[0]} to {all_dates[-1]}")
-        return all_dates, True
-    
-    elif last_feature_date >= last_master_date:
-        # Features are up to date
+
+    missing_dates = sorted(set(curated_dates) - set(feature_dates))
+    if not missing_dates:
         print("features are up to date - no new dates to process")
         return [], False
-    
-    else:
-        # Incremental update - generate date range
-        date = last_feature_date + timedelta(days=1)
-        new_dates = []
-        while date <= last_master_date:
-            new_dates.append(date)
-            date += timedelta(days=1)
-        
-        print(f"found {len(new_dates)} new dates to process")
-        print(f"  date range: {new_dates[0]} to {new_dates[-1]}")
-        return new_dates, False
+
+    print(f"found {len(missing_dates)} new dates to process")
+    print(f"  date range: {missing_dates[0]} to {missing_dates[-1]}")
+    is_full_rebuild = len(feature_dates) == 0
+    return missing_dates, is_full_rebuild
 
 
 def load_curated_data(date_filter=None):
@@ -144,29 +132,55 @@ def load_curated_data(date_filter=None):
         date_filter: list of dates to process (None = load all)
     """
     curated_path = Path("data/curated.market")
-    files = list(curated_path.glob("date=*/daily.parquet"))
+    manifest_dates = get_manifest_dates(CURATED_MANIFEST)
+    if manifest_dates:
+        available_dates = sorted([pd.to_datetime(d).date() for d in manifest_dates])
+        files = [curated_path / f"date={d}" / "daily.parquet" for d in manifest_dates]
+    else:
+        available_dates = []
+        files = list(curated_path.glob("date=*/daily.parquet"))
     
     if not files:
         raise FileNotFoundError(f"No curated data found in {curated_path}")
     
     # If filtering, load context window for rolling calculations
     if date_filter:
-        # Need 60 days before first date for rolling windows
-        context_start = min(date_filter) - timedelta(days=70)  # buffer
-        context_end = max(date_filter)
-        
-        date_strs = set()
-        for f in files:
-            date_str = f.parent.name.replace("date=", "")
-            try:
-                file_date = pd.to_datetime(date_str).date()
-                if context_start <= file_date <= context_end:
-                    date_strs.add(date_str)
-            except:
-                pass
-        
-        files = [f for f in files if f.parent.name.replace("date=", "") in date_strs]
-        print(f"Loading {len(files)} curated partitions (with 60-day context window)...")
+        # Use a fixed row-count buffer for rolling windows (60 for max window + 10 safety buffer)
+        buffer_rows = 70
+        if available_dates:
+            date_filter = sorted(date_filter)
+            start_date = date_filter[0]
+            end_date = date_filter[-1]
+
+            if start_date in available_dates:
+                start_idx = available_dates.index(start_date)
+            else:
+                start_idx = max(0, len([d for d in available_dates if d < start_date]) - 1)
+
+            end_idx = max(i for i, d in enumerate(available_dates) if d <= end_date)
+            context_start_idx = max(0, start_idx - buffer_rows)
+            context_dates = available_dates[context_start_idx:end_idx + 1]
+
+            date_strs = {d.strftime("%Y-%m-%d") for d in context_dates}
+            files = [f for f in files if f.parent.name.replace("date=", "") in date_strs]
+            print(f"Loading {len(files)} curated partitions (with {buffer_rows}-row context window)...")
+        else:
+            # Fallback to calendar window if manifest dates missing
+            context_start = min(date_filter) - timedelta(days=150)
+            context_end = max(date_filter)
+
+            date_strs = set()
+            for f in files:
+                date_str = f.parent.name.replace("date=", "")
+                try:
+                    file_date = pd.to_datetime(date_str).date()
+                    if context_start <= file_date <= context_end:
+                        date_strs.add(date_str)
+                except:
+                    pass
+
+            files = [f for f in files if f.parent.name.replace("date=", "") in date_strs]
+            print(f"Loading {len(files)} curated partitions (with calendar buffer)...")
     else:
         print(f"Loading {len(files)} curated partitions (full)...")
     
@@ -181,80 +195,108 @@ def load_curated_data(date_filter=None):
     return df
 
 
+def pivot_curated_data(df):
+    """
+    Pivot curated data so each row = one trading date.
+    This makes rolling calculations much clearer: rolling(60) = 60 trading days.
+    
+    Input: Long format (5 rows per date, one per symbol)
+    Output: Wide format (1 row per date, symbols as column prefixes)
+    
+    Columns: date, spy_ret, spy_adj_close, tlt_ret, tlt_adj_close, hyg_ret, hyg_adj_close,
+             vix, vix3m
+    """
+    # Pivot returns and prices
+    returns = df.pivot(index='date', columns='symbol', values='ret')
+    prices = df.pivot(index='date', columns='symbol', values='adj_close')
+    
+    # Flatten and rename columns
+    wide_df = pd.DataFrame({
+        'date': returns.index,
+        'spy_ret': returns['SPY'].values,
+        'spy_adj_close': prices['SPY'].values,
+        'tlt_ret': returns['TLT'].values,
+        'tlt_adj_close': prices['TLT'].values,
+        'hyg_ret': returns['HYG'].values,
+        'hyg_adj_close': prices['HYG'].values,
+        'vix': prices['^VIX'].values,
+        'vix3m': prices['^VIX3M'].values,
+    }).reset_index(drop=True)
+    
+    return wide_df
+
+
 def compute_spy_returns(df):
     """
     Compute SPY multi-period log returns
     
+    Input: Wide-format dataframe with spy_ret column (1 row per date)
+    Output: Same format with spy_ret_Xd columns added
+    
     Uses pre-computed daily log returns from curated data.
     Multi-period returns are computed by summing daily log returns
     (log returns are additive).
-    """
-    spy = df[df['symbol'] == 'SPY'].copy()
     
-    # Use pre-computed log returns from curated data (efficient!)
+    Now rolling(60) means exactly 60 trading days!
+    """
+    df = df.copy()
+    
     for window in [1, 5, 10, 20, 60]:
         col_name = f'spy_ret_{window}d'
         if window == 1:
-            # 1-day return is just the daily log return
-            spy[col_name] = spy['ret']
+            df[col_name] = df['spy_ret']
         else:
-            # Multi-day return = sum of daily log returns (log returns are additive)
-            spy[col_name] = spy['ret'].rolling(window).sum()
+            df[col_name] = df['spy_ret'].rolling(window).sum()
     
-    # Keep only date and return columns
-    ret_cols = ['date'] + [f'spy_ret_{w}d' for w in [1, 5, 10, 20, 60]]
-    return spy[ret_cols]
+    return df
 
 
 def compute_spy_volatility(df):
     """
     Compute SPY realized volatility using sqrt(sum(r^2))
     
-    Uses pre-computed daily log returns from curated data.
+    Input: Wide-format dataframe with spy_ret column
+    Output: Same format with spy_vol_Xd columns added
+    
     Realized volatility = sqrt(sum of squared log returns)
     """
-    spy = df[df['symbol'] == 'SPY'].copy()
+    df = df.copy()
     
     for window in [5, 10, 20, 60]:
         col_name = f'spy_vol_{window}d'
-        # Realized vol: sqrt(sum of squared log returns)
-        spy[col_name] = spy['ret'].rolling(window).apply(
+        df[col_name] = df['spy_ret'].rolling(window).apply(
             lambda x: np.sqrt(np.sum(x**2)), raw=True
         )
     
-    vol_cols = ['date'] + [f'spy_vol_{w}d' for w in [5, 10, 20, 60]]
-    return spy[vol_cols]
+    return df
 
 
 def compute_drawdown(df):
     """Compute 60-day peak-to-trough drawdown for SPY"""
-    spy = df[df['symbol'] == 'SPY'].copy()
+    df = df.copy()
     
-    # Rolling 60-day max
-    rolling_max = spy['adj_close'].rolling(60).max()
-    spy['drawdown_60d'] = 1 - (spy['adj_close'] / rolling_max)
+    rolling_max = df['spy_adj_close'].rolling(60).max()
+    df['drawdown_60d'] = 1 - (df['spy_adj_close'] / rolling_max)
     
-    return spy[['date', 'drawdown_60d']]
+    return df
 
 
 def compute_vix_features(df):
     """Extract VIX, VIX3M, and compute term structure"""
-    vix = df[df['symbol'] == '^VIX'][['date', 'adj_close']].rename(columns={'adj_close': 'vix'})
-    vix3m = df[df['symbol'] == '^VIX3M'][['date', 'adj_close']].rename(columns={'adj_close': 'vix3m'})
+    df = df.copy()
     
-    # Merge and compute term structure
-    vix_df = vix.merge(vix3m, on='date', how='inner')
-    vix_df['vix_term'] = vix_df['vix3m'] / vix_df['vix']
+    # VIX and VIX3M already in wide format
+    df['vix_term'] = df['vix3m'] / df['vix']
     
-    return vix_df
+    return df
 
 
 def compute_rsi(df, window=14):
     """Compute 14-day RSI for SPY"""
-    spy = df[df['symbol'] == 'SPY'].copy()
+    df = df.copy()
     
     # Calculate price changes
-    delta = spy['adj_close'].diff()
+    delta = df['spy_adj_close'].diff()
     
     # Separate gains and losses
     gain = (delta.where(delta > 0, 0)).rolling(window).mean()
@@ -262,61 +304,59 @@ def compute_rsi(df, window=14):
     
     # Calculate RS and RSI
     rs = gain / loss
-    spy['rsi_spy_14'] = 100 - (100 / (1 + rs))
+    df['rsi_spy_14'] = 100 - (100 / (1 + rs))
     
-    return spy[['date', 'rsi_spy_14']]
+    return df
 
 
 def compute_correlations(df):
     """
     Compute rolling correlations between SPY and other assets
     
-    Uses pre-computed daily log returns from curated data.
+    Input: Wide-format dataframe with spy_ret, tlt_ret, hyg_ret columns
+    Output: Same format with correlation columns added
     """
-    # Pivot log returns to wide format
-    returns_wide = df.pivot(index='date', columns='symbol', values='ret')
+    df = df.copy()
     
     # 20-day correlations
-    corr_spy_tlt_20d = returns_wide['SPY'].rolling(20).corr(returns_wide['TLT'])
-    corr_spy_hyg_20d = returns_wide['SPY'].rolling(20).corr(returns_wide['HYG'])
+    df['corr_spy_tlt_20d'] = df['spy_ret'].rolling(20).corr(df['tlt_ret'])
+    df['corr_spy_hyg_20d'] = df['spy_ret'].rolling(20).corr(df['hyg_ret'])
     
     # 60-day correlations
-    corr_spy_tlt_60d = returns_wide['SPY'].rolling(60).corr(returns_wide['TLT'])
-    corr_spy_hyg_60d = returns_wide['SPY'].rolling(60).corr(returns_wide['HYG'])
+    df['corr_spy_tlt_60d'] = df['spy_ret'].rolling(60).corr(df['tlt_ret'])
+    df['corr_spy_hyg_60d'] = df['spy_ret'].rolling(60).corr(df['hyg_ret'])
     
-    corr_df = pd.DataFrame({
-        'date': returns_wide.index,
-        'corr_spy_tlt_20d': corr_spy_tlt_20d.values,
-        'corr_spy_hyg_20d': corr_spy_hyg_20d.values,
-        'corr_spy_tlt_60d': corr_spy_tlt_60d.values,
-        'corr_spy_hyg_60d': corr_spy_hyg_60d.values
-    })
-    
-    return corr_df
+    return df
 
 
 def compute_spreads(df):
-    """Compute HYG-TLT spread and realized vol vs VIX spread"""
-    # Get returns for HYG and TLT
-    hyg = df[df['symbol'] == 'HYG'][['date', 'ret']].rename(columns={'ret': 'ret_hyg'})
-    tlt = df[df['symbol'] == 'TLT'][['date', 'ret']].rename(columns={'ret': 'ret_tlt'})
+    """Compute HYG-TLT spread"""
+    df = df.copy()
     
-    # HYG-TLT spread
-    spread_df = hyg.merge(tlt, on='date', how='inner')
-    spread_df['hyg_tlt_spread'] = spread_df['ret_hyg'] - spread_df['ret_tlt']
+    # HYG-TLT spread (difference in daily returns)
+    df['hyg_tlt_spread'] = df['hyg_ret'] - df['tlt_ret']
     
-    return spread_df[['date', 'hyg_tlt_spread']]
+    return df
 
 
 def build_features(df):
-    """Build all Level 1 features and merge into single dataframe per date"""
+    """
+    Build all Level 1 features from curated data.
+    
+    New approach: Pivot data to wide format (1 row = 1 date) FIRST,
+    then compute all features on the wide dataframe.
+    This makes rolling calculations crystal clear: rolling(60) = 60 trading days!
+    """
     print("\nComputing features...")
     
+    print("  - Pivoting data (1 row = 1 trading date)...")
+    df = pivot_curated_data(df)
+    
     print("  - SPY returns (1d, 5d, 10d, 20d, 60d)...")
-    spy_returns = compute_spy_returns(df)
+    df = compute_spy_returns(df)
     
     print("  - SPY volatility (5d, 10d, 20d, 60d)...")
-    spy_vol = compute_spy_volatility(df)
+    df = compute_spy_volatility(df)
     
     print("  - Drawdown (60d)...")
     drawdown = compute_drawdown(df)
@@ -324,30 +364,55 @@ def build_features(df):
     print("  - VIX features (vix, vix3m, vix_term)...")
     vix_features = compute_vix_features(df)
     
+    print("  - Drawdown (60d)...")
+    df = compute_drawdown(df)
+    
+    print("  - VIX features (vix, vix3m, vix_term)...")
+    df = compute_vix_features(df)
+    
     print("  - RSI (14d)...")
-    rsi = compute_rsi(df)
+    df = compute_rsi(df)
     
     print("  - Correlations (20d, 60d)...")
-    correlations = compute_correlations(df)
+    df = compute_correlations(df)
     
-    print("  - Spreads (HYG-TLT, RV-VIX)...")
-    spreads = compute_spreads(df)
-    
-    # Merge all features on date
-    print("\n  - Merging features...")
-    features = spy_returns
-    for feat_df in [spy_vol, drawdown, vix_features, rsi, correlations, spreads]:
-        features = features.merge(feat_df, on='date', how='left')
+    print("  - Spreads (HYG-TLT)...")
+    df = compute_spreads(df)
     
     # Compute RV-VIX spread (needs spy_vol_20d and vix)
-    features['rv_vix_spread_20d'] = features['spy_vol_20d'] - features['vix']
+    df['rv_vix_spread_20d'] = df['spy_vol_20d'] - df['vix']
     
-    return features
+    # Select final feature columns in desired order
+    feature_cols = [
+        'date',
+        'spy_ret_1d', 'spy_ret_5d', 'spy_ret_10d', 'spy_ret_20d', 'spy_ret_60d',
+        'spy_vol_5d', 'spy_vol_10d', 'spy_vol_20d', 'spy_vol_60d',
+        'drawdown_60d',
+        'vix', 'vix3m', 'vix_term',
+        'rsi_spy_14',
+        'corr_spy_tlt_20d', 'corr_spy_hyg_20d', 'corr_spy_tlt_60d', 'corr_spy_hyg_60d',
+        'hyg_tlt_spread',
+        'rv_vix_spread_20d'
+    ]
+    
+    return df[feature_cols]
 
 
 def write_partitions(df, output_dir="data/features.L1"):
     """Write features partitioned by date"""
     output_path = Path(output_dir)
+    
+    # Quick validation before writing
+    print("\nValidating features...")
+    is_valid, errors = validate_features_batch(df)
+    
+    if not is_valid:
+        print("❌ Feature validation FAILED:")
+        for error in errors:
+            print(f"     {error}")
+        raise ValueError(f"Feature validation failed. Aborting write.")
+    
+    print("✅ Features validated")
     
     # Group by date and write partitions
     dates = df['date'].unique()
@@ -359,10 +424,48 @@ def write_partitions(df, output_dir="data/features.L1"):
         partition_dir.mkdir(parents=True, exist_ok=True)
         
         date_df = df[df['date'] == date]
+        
+        # Quick check: each partition should be 1 row
+        if len(date_df) != 1:
+            raise ValueError(f"Partition {date_str} has {len(date_df)} rows, expected 1")
+        
         outfile = partition_dir / "features.parquet"
         date_df.to_parquet(outfile, index=False)
     
     print(f"Wrote {len(dates)} partitions to {output_path}")
+
+    # Update manifest with full history (self-healing from disk)
+    manifest_path = output_path / "_manifest.json"
+    
+    # Get dates from disk (authoritative source)
+    disk_dates = []
+    for date_dir in output_path.iterdir():
+        if date_dir.is_dir() and date_dir.name.startswith("date="):
+            date_str = date_dir.name.replace("date=", "")
+            disk_dates.append(date_str)
+    
+    # Merge with manifest if it exists
+    existing_dates = []
+    if manifest_path.exists():
+        try:
+            with open(manifest_path, "r") as f:
+                payload = json.load(f)
+            existing_dates = payload.get("dates", [])
+        except Exception:
+            existing_dates = []
+
+    # Merge all sources: disk (authoritative) + existing manifest + new writes
+    new_dates = [pd.to_datetime(d).strftime("%Y-%m-%d") for d in dates]
+    merged = sorted(set(disk_dates) | set(existing_dates) | set(new_dates))
+    
+    payload = {
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "dates": merged
+    }
+    with open(manifest_path, "w") as f:
+        json.dump(payload, f, indent=2)
+    
+    print(f"Updated manifest with {len(merged)} total dates")
 
 
 def main():
@@ -384,27 +487,32 @@ def main():
     print(f"\nMode: {mode}")
     print(f"Processing {len(dates_to_process)} dates")
     
-    # Load curated data (with context for rolling windows)
+    # Load curated data with sufficient context for rolling windows
     print("\nStep 2: Loading curated data...")
-    if not is_full_rebuild:
-        df = load_curated_data(date_filter=dates_to_process)
-    else:
+    if is_full_rebuild:
+        print("  Full rebuild: loading ALL curated data...")
         df = load_curated_data()
+    else:
+        # Incremental: load new dates + 120-row buffer for rolling features
+        print(f"  Incremental: loading {len(dates_to_process)} new dates + 120-row context buffer...")
+        df = load_curated_data(date_filter=dates_to_process)
     
-    # Build features
+    print(f"  Loaded {len(df)} total rows for feature computation")
+    
+    # Build features on loaded dataset
     print("\nStep 3: Computing features...")
-    df = build_features(df)
+    features_df = build_features(df)
     
-    # Filter to only dates we're processing
+    # Filter to only dates we're processing (write only new partitions)
     if not is_full_rebuild:
-        df['date'] = pd.to_datetime(df['date'])
+        features_df['date'] = pd.to_datetime(features_df['date'])
         filter_dates = pd.to_datetime([d for d in dates_to_process])
-        df = df[df['date'].isin(filter_dates)]
-        print(f"Filtered to {len(df)} rows for target dates")
+        features_df = features_df[features_df['date'].isin(filter_dates)]
+        print(f"Filtered to {len(features_df)} feature rows for {len(dates_to_process)} target dates")
     
     # Write partitioned output
     print("\nStep 4: Writing features...")
-    write_partitions(df)
+    write_partitions(features_df)
     
     print("\nFeature engineering complete.")
     print("=" * 60)
