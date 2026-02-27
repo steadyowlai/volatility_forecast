@@ -3,15 +3,18 @@ import json
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from pathlib import Path
 from datetime import datetime, timedelta
 
 from schemas import raw_market_schema, curated_market_daily_schema
+from storage import Storage
+
+# Initialize storage (auto-detects local vs S3)
+storage = Storage()
 
 # Configuration
-DATA_RAW = Path("data/raw.market")
-DATA_CURATED = Path("data/curated.market")
-MASTER_DATASET = Path("data/master_dataset.parquet")
+DATA_RAW = "data/raw.market"
+DATA_CURATED = "data/curated.market"
+MASTER_DATASET = "data/master_dataset.parquet"
 
 # Configurable start date (can override via environment variable)
 # Default: 2010-01-01 - Post-financial crisis "new normal" regime
@@ -27,40 +30,36 @@ TICKERS = [
     "HYG",     # High-yield corporate bond ETF (credit risk)
 ]
 
-def get_existing_dates(data_dir: Path) -> list:
+def get_existing_dates(data_dir: str) -> list:
     """
-    get list of dates we already have data for
-    checks partition folders like date=2010-01-04
+    Get list of dates we already have data for.
+    Uses storage layer to check partitions like date=2010-01-04
+    
+    Args:
+        data_dir: Directory path (e.g., 'data/curated.market')
+    
+    Returns:
+        List of date objects, sorted
     """
-    if not data_dir.exists():
-        return []
-    
-    dates = []
-    for date_folder in data_dir.iterdir():
-        if date_folder.is_dir() and date_folder.name.startswith("date="):
-            date_str = date_folder.name.replace("date=", "")
-            try:
-                dates.append(pd.to_datetime(date_str).date())
-            except:
-                pass
-    
-    return sorted(dates)
-
-def get_manifest_dates(manifest_path: Path) -> list:
-    """Read dates from manifest file."""
-    if not manifest_path.exists():
-        return []
-    
     try:
-        with open(manifest_path, 'r') as f:
-            data = json.load(f)
+        date_strings = storage.list_partitions(data_dir)
+        dates = [pd.to_datetime(d).date() for d in date_strings]
+        return sorted(dates)
+    except Exception as e:
+        print(f"  warning: could not list partitions: {e}")
+        return []
+
+def get_manifest_dates(manifest_path: str) -> list:
+    """Read dates from manifest file using storage layer."""
+    try:
+        data = storage.read_json(manifest_path)
         return data.get('dates', [])
     except Exception as e:
-        print(f"warning: could not read manifest: {e}")
+        print(f"  warning: could not read manifest: {e}")
         return []
 
 
-def determine_download_range(data_dir: Path, default_start: str) -> tuple:
+def determine_download_range(data_dir: str, default_start: str) -> tuple:
     """
     Figure out what date range to download.
     
@@ -75,7 +74,7 @@ def determine_download_range(data_dir: Path, default_start: str) -> tuple:
     end_date = datetime.now().date()
     
     # Priority 1: Check curated manifest
-    manifest_path = data_dir / "_manifest.json"
+    manifest_path = f"{data_dir}/_manifest.json"
     manifest_dates = get_manifest_dates(manifest_path)
     
     if manifest_dates:
@@ -139,6 +138,10 @@ def download_one(symbol: str, start_date: str, end_date: str = None) -> pd.DataF
     df = df.rename_axis("date").reset_index()
     df = df.rename(columns=str.lower)
     
+    # Normalize date: strip timezone info and keep only the date part
+    # yfinance returns timezone-aware timestamps (UTC) which can shift dates
+    df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None).dt.normalize()
+    
     #yfinance gives "adj close" for equities; for indices like VIX, VIX3M, it gives no adj close
     if "adj close" not in df.columns:
         df["adj close"] = df["close"]
@@ -191,68 +194,90 @@ def build_curated(df_all: pd.DataFrame, is_incremental: bool = False) -> pd.Data
     df = df_all.copy()
     df["date"] = pd.to_datetime(df["date"])
     df["adj_close"] = df["adj close"]
-    
-    # If incremental, load last date from curated manifest for return calculation
+
+    # If incremental, load the last already-written date as context for return calculation.
+    # We load strictly the last manifest date (not included in df_all) so there are no
+    # overlapping rows between prev_df and df — making this safe to re-run.
+    prev_last_date_str = None
     if is_incremental:
-        manifest_dates = get_manifest_dates(DATA_CURATED / "_manifest.json")
+        manifest_path = f"{DATA_CURATED}/_manifest.json"
+        manifest_dates = get_manifest_dates(manifest_path)
         if manifest_dates:
-            last_date_str = max(manifest_dates)
-            prev_file = DATA_CURATED / f"date={last_date_str}" / "daily.parquet"
-            
-            if prev_file.exists():
+            # Find the last manifest date that is strictly before our new data
+            min_new_date = pd.to_datetime(df_all["date"]).dt.tz_localize(None).dt.normalize().min()
+            earlier_dates = [d for d in manifest_dates if pd.to_datetime(d).date() < min_new_date.date()]
+            if earlier_dates:
+                prev_last_date_str = max(earlier_dates)
+                prev_file = f"{DATA_CURATED}/date={prev_last_date_str}/daily.parquet"
                 try:
-                    prev_df = pd.read_parquet(prev_file)
+                    prev_df = storage.read_parquet(prev_file)
                     prev_df["date"] = pd.to_datetime(prev_df["date"])
-                    # Append previous day's data to compute returns correctly
                     df = pd.concat([prev_df, df], ignore_index=True)
-                    print(f"  loaded previous date ({last_date_str}) for return calculation")
+                    print(f"  loaded previous date ({prev_last_date_str}) for return calculation")
                 except Exception as e:
                     print(f"  warning: could not load previous date for returns: {e}")
-    
+
+    # Deduplicate before computing returns: keep last occurrence of each (symbol, date)
+    df = df.drop_duplicates(subset=["symbol", "date"], keep="last")
     df = df.sort_values(["symbol", "date"])
-    
+
     # Compute log returns (canonical)
     df["ret"] = np.log(df["adj_close"] / df.groupby("symbol")["adj_close"].shift(1))
-    
-    # If we loaded previous data, filter to only new dates
-    if is_incremental:
-        min_new_date = pd.to_datetime(df_all["date"]).min()
-        df = df[df["date"] >= min_new_date]
-    
+
+    # Drop the context row — keep only the genuinely new dates
+    if prev_last_date_str:
+        cutoff = pd.to_datetime(prev_last_date_str)
+        df = df[df["date"] > cutoff]
+
     curated = df[["symbol", "date", "close", "adj_close", "ret"]].copy()
-    
+
+    # Validate: if any rows still have NaN ret, drop them entirely and log.
+    # A NaN ret on date D would poison rv_5d for the 5 days before D — dropping
+    # is far safer. The next run will use the last valid partition as context
+    # and return calculation continues cleanly from there.
+    nan_ret = curated[curated["ret"].isna()]
+    if not nan_ret.empty:
+        bad_dates = sorted(nan_ret["date"].dt.strftime("%Y-%m-%d").unique())
+        bad_count = len(nan_ret)
+        print(f"  WARNING: dropping {bad_count} rows with NaN ret for dates: {bad_dates}")
+        print(f"  These dates will be skipped — next run uses last valid partition as context.")
+        curated = curated[curated["ret"].notna()].copy()
+
     return curated
   
-def write_partitions(df: pd.DataFrame, root: Path, fname: str) -> None:
+def write_partitions(df: pd.DataFrame, root: str, fname: str) -> None:
     """
-    Write df patitioned by date:
-    root/date-=YYYY-MM-DD/fname.parquet
+    Write df partitioned by date using storage layer:
+    root/date=YYYY-MM-DD/fname.parquet
+    
+    Args:
+        df: DataFrame to write
+        root: Root path (e.g., 'data/raw.market')
+        fname: Filename without extension (e.g., 'daily')
     """
-    root.mkdir(parents=True, exist_ok=True)
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"])
-    
+    # Deduplicate: keep last occurrence of each (symbol, date) before writing
+    df = df.drop_duplicates(subset=["symbol", "date"], keep="last")
+
     for d, g in df.groupby(df["date"].dt.strftime("%Y-%m-%d")):
-        outdir = root / f"date={d}"
-        outdir.mkdir(parents=True, exist_ok=True)
-        outpath = outdir / f"{fname}.parquet"
-        g.to_parquet(outpath, index=False)
+        outpath = f"{root}/date={d}/{fname}.parquet"
+        storage.write_parquet(g, outpath)
 
 
-def update_manifest(root: Path, new_dates: list) -> None:
+def update_manifest(root: str, new_dates: list) -> None:
     """Write a date manifest to avoid full directory scans."""
-    manifest_path = root / "_manifest.json"
-    # Use on-disk partitions as the authoritative source for completeness
+    manifest_path = f"{root}/_manifest.json"
+    
+    # Use storage layer to get existing partitions
     disk_dates = [d.strftime("%Y-%m-%d") for d in get_existing_dates(root)]
     existing_dates = []
 
-    if manifest_path.exists():
-        try:
-            with open(manifest_path, "r") as f:
-                payload = json.load(f)
-            existing_dates = payload.get("dates", [])
-        except Exception:
-            existing_dates = []
+    try:
+        payload = storage.read_json(manifest_path)
+        existing_dates = payload.get("dates", [])
+    except Exception:
+        existing_dates = []
 
     merged = sorted(set(existing_dates) | set(disk_dates) | set(new_dates))
     payload = {
@@ -260,8 +285,7 @@ def update_manifest(root: Path, new_dates: list) -> None:
         "dates": merged
     }
 
-    with open(manifest_path, "w") as f:
-        json.dump(payload, f, indent=2)
+    storage.write_json(payload, manifest_path)
 
 
 def main():
@@ -322,6 +346,56 @@ def main():
     update_manifest(DATA_CURATED, all_dates)
     
     print("ingestion complete.")
+
+
+# Lambda handler for AWS Lambda
+def lambda_handler(event, context):
+    """
+    AWS Lambda entry point.
+    
+    Args:
+        event: Lambda event object (not used)
+        context: Lambda context object (not used)
+    
+    Returns:
+        Response dict with statusCode and body
+    """
+    print("=" * 60)
+    print("AWS Lambda - Market Data Ingestion")
+    print("=" * 60)
+    
+    try:
+        main()
+        response = {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': 'Ingestion completed successfully',
+                'timestamp': datetime.utcnow().isoformat() + 'Z'
+            })
+        }
+        # Chain: trigger vf-features asynchronously
+        try:
+            import boto3
+            boto3.client('lambda', region_name='us-east-1').invoke(
+                FunctionName='vf-features',
+                InvocationType='Event'
+            )
+            print("Triggered vf-features")
+        except Exception as chain_err:
+            print(f"WARNING: Failed to trigger vf-features: {chain_err}")
+        return response
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'statusCode': 500,
+            'body': json.dumps({
+                'error': str(e),
+                'timestamp': datetime.utcnow().isoformat() + 'Z'
+            })
+        }
+
     
 if __name__ == "__main__":
     main()

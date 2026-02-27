@@ -1,0 +1,16 @@
+# Minimal requirements for Ingest Lambda
+# Only what's actually needed by app.py, schemas.py, and storage.py
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=11.0.0
+
+# Schema validation (for schemas.py)
+pandera>=0.17.0
+
+# Market data download (for app.py)
+yfinance>=0.2.0
+
+# AWS SDK (for storage.py in Lambda)
+boto3>=1.28.0

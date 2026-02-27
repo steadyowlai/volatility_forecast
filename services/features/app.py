@@ -9,24 +9,22 @@ Incremental processing: Only computes features for new dates not yet in features
 import json
 import pandas as pd
 import numpy as np
-from pathlib import Path
 from datetime import datetime, timedelta
 
-from data_status import get_last_date
+from storage import Storage
 from validate_features import validate_feature_partition, validate_features_batch
 
-CURATED_MANIFEST = Path("data/curated.market/_manifest.json")
-FEATURES_MANIFEST = Path("data/features.L1/_manifest.json")
+# Initialize storage (auto-detects local vs S3)
+storage = Storage()
+
+CURATED_MANIFEST = "data/curated.market/_manifest.json"
+FEATURES_MANIFEST = "data/features.L1/_manifest.json"
 
 
-def get_manifest_dates(manifest_path: Path) -> list:
-    if not manifest_path.exists():
-        return []
-
+def get_manifest_dates(manifest_path: str) -> list:
     try:
-        with open(manifest_path, "r") as f:
-            payload = json.load(f)
-        return payload.get("dates", [])
+        data = storage.read_json(manifest_path)
+        return data.get("dates", [])
     except Exception:
         return []
 
@@ -37,61 +35,21 @@ def get_available_curated_dates():
     if manifest_dates:
         return sorted([pd.to_datetime(d).date() for d in manifest_dates])
 
-    curated_path = Path("data/curated.market")
-    files = list(curated_path.glob("date=*/daily.parquet"))
-
+    # Fallback: scan partitions via storage layer
+    date_strings = storage.list_partitions("data/curated.market")
     dates = []
-    for f in files:
-        date_str = f.parent.name.replace("date=", "")
+    for d in date_strings:
         try:
-            dates.append(pd.to_datetime(date_str).date())
-        except:
+            dates.append(pd.to_datetime(d).date())
+        except Exception:
             pass
-
     return sorted(dates)
 
 
 def get_existing_feature_dates():
-    """Get dates that already have features computed"""
+    """Get dates that already have features computed, from manifest only."""
     manifest_dates = get_manifest_dates(FEATURES_MANIFEST)
-    if manifest_dates:
-        manifest_parsed = sorted([pd.to_datetime(d).date() for d in manifest_dates])
-        features_path = Path("data/features.L1")
-        if features_path.exists():
-            files = list(features_path.glob("date=*/features.parquet"))
-            disk_dates = []
-            for f in files:
-                date_str = f.parent.name.replace("date=", "")
-                try:
-                    disk_dates.append(pd.to_datetime(date_str).date())
-                except:
-                    pass
-            disk_dates = sorted(set(disk_dates))
-            if disk_dates and (len(disk_dates) > len(manifest_parsed) or min(disk_dates) < min(manifest_parsed)):
-                payload = {
-                    "updated_at": datetime.utcnow().isoformat() + "Z",
-                    "dates": [d.strftime("%Y-%m-%d") for d in disk_dates]
-                }
-                with open(FEATURES_MANIFEST, "w") as f:
-                    json.dump(payload, f, indent=2)
-                return disk_dates
-        return manifest_parsed
-
-    features_path = Path("data/features.L1")
-    if not features_path.exists():
-        return []
-
-    files = list(features_path.glob("date=*/features.parquet"))
-
-    dates = []
-    for f in files:
-        date_str = f.parent.name.replace("date=", "")
-        try:
-            dates.append(pd.to_datetime(date_str).date())
-        except:
-            pass
-
-    return sorted(dates)
+    return sorted([pd.to_datetime(d).date() for d in manifest_dates])
 
 
 def determine_dates_to_process():
@@ -125,27 +83,25 @@ def determine_dates_to_process():
 def load_curated_data(date_filter=None):
     """
     Load curated market data, optionally filtered by dates.
-    
+
     For incremental processing, we need context (60 days lookback) for rolling windows.
-    
+
     Args:
         date_filter: list of dates to process (None = load all)
     """
-    curated_path = Path("data/curated.market")
     manifest_dates = get_manifest_dates(CURATED_MANIFEST)
     if manifest_dates:
         available_dates = sorted([pd.to_datetime(d).date() for d in manifest_dates])
-        files = [curated_path / f"date={d}" / "daily.parquet" for d in manifest_dates]
+        all_date_strs = manifest_dates
     else:
         available_dates = []
-        files = list(curated_path.glob("date=*/daily.parquet"))
-    
-    if not files:
-        raise FileNotFoundError(f"No curated data found in {curated_path}")
-    
+        all_date_strs = storage.list_partitions("data/curated.market")
+
+    if not all_date_strs:
+        raise FileNotFoundError("No curated data found in data/curated.market")
+
     # If filtering, load context window for rolling calculations
     if date_filter:
-        # Use a fixed row-count buffer for rolling windows (60 for max window + 10 safety buffer)
         buffer_rows = 70
         if available_dates:
             date_filter = sorted(date_filter)
@@ -160,37 +116,38 @@ def load_curated_data(date_filter=None):
             end_idx = max(i for i, d in enumerate(available_dates) if d <= end_date)
             context_start_idx = max(0, start_idx - buffer_rows)
             context_dates = available_dates[context_start_idx:end_idx + 1]
-
-            date_strs = {d.strftime("%Y-%m-%d") for d in context_dates}
-            files = [f for f in files if f.parent.name.replace("date=", "") in date_strs]
-            print(f"Loading {len(files)} curated partitions (with {buffer_rows}-row context window)...")
+            load_strs = {d.strftime("%Y-%m-%d") for d in context_dates}
         else:
-            # Fallback to calendar window if manifest dates missing
             context_start = min(date_filter) - timedelta(days=150)
             context_end = max(date_filter)
-
-            date_strs = set()
-            for f in files:
-                date_str = f.parent.name.replace("date=", "")
-                try:
-                    file_date = pd.to_datetime(date_str).date()
-                    if context_start <= file_date <= context_end:
-                        date_strs.add(date_str)
-                except:
-                    pass
-
-            files = [f for f in files if f.parent.name.replace("date=", "") in date_strs]
-            print(f"Loading {len(files)} curated partitions (with calendar buffer)...")
+            load_strs = {
+                d for d in all_date_strs
+                if context_start <= pd.to_datetime(d).date() <= context_end
+            }
+        files_to_load = [s for s in all_date_strs if s in load_strs]
+        print(f"Loading {len(files_to_load)} curated partitions (with {buffer_rows}-row context window)...")
     else:
-        print(f"Loading {len(files)} curated partitions (full)...")
-    
-    if not files:
+        files_to_load = all_date_strs
+        print(f"Loading {len(files_to_load)} curated partitions (full)...")
+
+    if not files_to_load:
         return pd.DataFrame()
-    
-    df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+
+    frames = []
+    for d in files_to_load:
+        path = f"data/curated.market/date={d}/daily.parquet"
+        try:
+            frames.append(storage.read_parquet(path))
+        except Exception as e:
+            print(f"  warning: could not read {path}: {e}")
+
+    if not frames:
+        return pd.DataFrame()
+
+    df = pd.concat(frames, ignore_index=True)
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values(['symbol', 'date']).reset_index(drop=True)
-    
+
     print(f"Loaded {len(df)} rows, {df['symbol'].nunique()} symbols")
     return df
 
@@ -399,72 +356,47 @@ def build_features(df):
 
 
 def write_partitions(df, output_dir="data/features.L1"):
-    """Write features partitioned by date"""
-    output_path = Path(output_dir)
-    
+    """Write features partitioned by date using storage layer"""
+
     # Quick validation before writing
     print("\nValidating features...")
     is_valid, errors = validate_features_batch(df)
-    
+
     if not is_valid:
-        print("❌ Feature validation FAILED:")
+        print("Feature validation FAILED:")
         for error in errors:
             print(f"     {error}")
-        raise ValueError(f"Feature validation failed. Aborting write.")
-    
-    print("✅ Features validated")
-    
+        raise ValueError("Feature validation failed. Aborting write.")
+
+    print("Features validated")
+
     # Group by date and write partitions
     dates = df['date'].unique()
     print(f"\nWriting {len(dates)} feature partitions...")
-    
+
     for date in dates:
         date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
-        partition_dir = output_path / f"date={date_str}"
-        partition_dir.mkdir(parents=True, exist_ok=True)
-        
         date_df = df[df['date'] == date]
-        
-        # Quick check: each partition should be 1 row
+
         if len(date_df) != 1:
             raise ValueError(f"Partition {date_str} has {len(date_df)} rows, expected 1")
-        
-        outfile = partition_dir / "features.parquet"
-        date_df.to_parquet(outfile, index=False)
-    
-    print(f"Wrote {len(dates)} partitions to {output_path}")
 
-    # Update manifest with full history (self-healing from disk)
-    manifest_path = output_path / "_manifest.json"
-    
-    # Get dates from disk (authoritative source)
-    disk_dates = []
-    for date_dir in output_path.iterdir():
-        if date_dir.is_dir() and date_dir.name.startswith("date="):
-            date_str = date_dir.name.replace("date=", "")
-            disk_dates.append(date_str)
-    
-    # Merge with manifest if it exists
-    existing_dates = []
-    if manifest_path.exists():
-        try:
-            with open(manifest_path, "r") as f:
-                payload = json.load(f)
-            existing_dates = payload.get("dates", [])
-        except Exception:
-            existing_dates = []
+        outpath = f"{output_dir}/date={date_str}/features.parquet"
+        storage.write_parquet(date_df, outpath)
 
-    # Merge all sources: disk (authoritative) + existing manifest + new writes
+    print(f"Wrote {len(dates)} partitions to {output_dir}")
+
+    # Update manifest: merge existing manifest dates + new writes
+    existing_dates = get_manifest_dates(FEATURES_MANIFEST)
     new_dates = [pd.to_datetime(d).strftime("%Y-%m-%d") for d in dates]
-    merged = sorted(set(disk_dates) | set(existing_dates) | set(new_dates))
-    
+    merged = sorted(set(existing_dates) | set(new_dates))
+
     payload = {
         "updated_at": datetime.utcnow().isoformat() + "Z",
         "dates": merged
     }
-    with open(manifest_path, "w") as f:
-        json.dump(payload, f, indent=2)
-    
+    storage.write_json(payload, FEATURES_MANIFEST)
+
     print(f"Updated manifest with {len(merged)} total dates")
 
 
@@ -516,6 +448,45 @@ def main():
     
     print("\nFeature engineering complete.")
     print("=" * 60)
+
+
+def lambda_handler(event, context):
+    """AWS Lambda entry point."""
+    print("=" * 60)
+    print("AWS Lambda - Feature Engineering Service")
+    print("=" * 60)
+
+    try:
+        main()
+        response = {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': 'Feature engineering completed successfully',
+                'timestamp': datetime.utcnow().isoformat() + 'Z'
+            })
+        }
+        # Chain: trigger vf-prepare-dataset asynchronously
+        try:
+            import boto3
+            boto3.client('lambda', region_name='us-east-1').invoke(
+                FunctionName='vf-prepare-dataset',
+                InvocationType='Event'
+            )
+            print("Triggered vf-prepare-dataset")
+        except Exception as chain_err:
+            print(f"WARNING: Failed to trigger vf-prepare-dataset: {chain_err}")
+        return response
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'statusCode': 500,
+            'body': json.dumps({
+                'error': str(e),
+                'timestamp': datetime.utcnow().isoformat() + 'Z'
+            })
+        }
 
 
 if __name__ == "__main__":

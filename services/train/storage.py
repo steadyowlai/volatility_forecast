@@ -45,7 +45,7 @@ class Storage:
             bucket_name: S3 bucket name (only used in AWS environment)
         """
         self.is_aws = os.getenv('AWS_EXECUTION_ENV') is not None
-        self.bucket_name = bucket_name or os.getenv('S3_BUCKET', 'volatility-forecast-data')
+        self.bucket_name = bucket_name or os.getenv('S3_BUCKET', 'volatility-forecast')
         
         if self.is_aws:
             import boto3

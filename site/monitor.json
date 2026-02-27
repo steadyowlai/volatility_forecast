@@ -1,0 +1,295 @@
+{
+  "metadata": {
+    "generated_at": "2026-02-27T16:42:19.841597Z",
+    "total_predictions": 35,
+    "predictions_with_actuals": 30,
+    "predictions_without_actuals": 5,
+    "model_trained_date": "2026-02-24"
+  },
+  "current_forecast": {
+    "date": "2026-02-25",
+    "volatility": 0.01556645892560482,
+    "volatility_pct": "1.56 percent",
+    "regime": "NORMAL",
+    "regime_emoji": "NORMAL",
+    "trend": "STABLE",
+    "trend_change_pct": -5.531041882874644,
+    "percentile": 46.666666666666664,
+    "confidence": "MEDIUM",
+    "insights": []
+  },
+  "latest_predictions": [
+    {
+      "date": "2026-02-19",
+      "prediction": 0.020999304950237274,
+      "prediction_pct": "2.10 percent"
+    },
+    {
+      "date": "2026-02-20",
+      "prediction": 0.015693625435233116,
+      "prediction_pct": "1.57 percent"
+    },
+    {
+      "date": "2026-02-23",
+      "prediction": 0.021434195339679718,
+      "prediction_pct": "2.14 percent"
+    },
+    {
+      "date": "2026-02-24",
+      "prediction": 0.01823822222650051,
+      "prediction_pct": "1.82 percent"
+    },
+    {
+      "date": "2026-02-25",
+      "prediction": 0.01556645892560482,
+      "prediction_pct": "1.56 percent"
+    }
+  ],
+  "predictions_vs_actuals": [
+    {
+      "date": "2026-01-06",
+      "actual_rv_5d": 0.007768641498750549,
+      "prediction": 0.012216819450259209,
+      "error": 0.004448177951508659,
+      "error_pct": "+57.3 percent"
+    },
+    {
+      "date": "2026-01-07",
+      "actual_rv_5d": 0.008614324792603746,
+      "prediction": 0.014112348668277264,
+      "error": 0.0054980238756735175,
+      "error_pct": "+63.8 percent"
+    },
+    {
+      "date": "2026-01-08",
+      "actual_rv_5d": 0.009032833879951536,
+      "prediction": 0.014084537513554096,
+      "error": 0.0050517036336025604,
+      "error_pct": "+55.9 percent"
+    },
+    {
+      "date": "2026-01-09",
+      "actual_rv_5d": 0.006232601843889589,
+      "prediction": 0.01248188130557537,
+      "error": 0.0062492794616857816,
+      "error_pct": "+100.3 percent"
+    },
+    {
+      "date": "2026-01-12",
+      "actual_rv_5d": 0.02143307953824707,
+      "prediction": 0.013187735341489315,
+      "error": -0.008245344196757754,
+      "error_pct": "-38.5 percent"
+    },
+    {
+      "date": "2026-01-13",
+      "actual_rv_5d": 0.02422904164944261,
+      "prediction": 0.014339406974613667,
+      "error": -0.009889634674828944,
+      "error_pct": "-40.8 percent"
+    },
+    {
+      "date": "2026-01-14",
+      "actual_rv_5d": 0.02428800884737453,
+      "prediction": 0.015316564589738846,
+      "error": -0.008971444257635686,
+      "error_pct": "-36.9 percent"
+    },
+    {
+      "date": "2026-01-15",
+      "actual_rv_5d": 0.024138002940825923,
+      "prediction": 0.014314849860966206,
+      "error": -0.009823153079859717,
+      "error_pct": "-40.7 percent"
+    },
+    {
+      "date": "2026-01-16",
+      "actual_rv_5d": 0.02464949521734446,
+      "prediction": 0.014664649032056332,
+      "error": -0.009984846185288127,
+      "error_pct": "-40.5 percent"
+    },
+    {
+      "date": "2026-01-20",
+      "actual_rv_5d": 0.014156800336035637,
+      "prediction": 0.0221543088555336,
+      "error": 0.007997508519497962,
+      "error_pct": "+56.5 percent"
+    },
+    {
+      "date": "2026-01-21",
+      "actual_rv_5d": 0.008291541926743412,
+      "prediction": 0.015583658590912819,
+      "error": 0.0072921166641694065,
+      "error_pct": "+87.9 percent"
+    },
+    {
+      "date": "2026-01-22",
+      "actual_rv_5d": 0.006749503758159262,
+      "prediction": 0.013790884986519814,
+      "error": 0.007041381228360551,
+      "error_pct": "+104.3 percent"
+    },
+    {
+      "date": "2026-01-23",
+      "actual_rv_5d": 0.00737199970934306,
+      "prediction": 0.015421622432768345,
+      "error": 0.008049622723425284,
+      "error_pct": "+109.2 percent"
+    },
+    {
+      "date": "2026-01-26",
+      "actual_rv_5d": 0.007299383974973118,
+      "prediction": 0.014217007905244827,
+      "error": 0.006917623930271709,
+      "error_pct": "+94.8 percent"
+    },
+    {
+      "date": "2026-01-27",
+      "actual_rv_5d": 0.010467672102468318,
+      "prediction": 0.012861830182373524,
+      "error": 0.002394158079905206,
+      "error_pct": "+22.9 percent"
+    },
+    {
+      "date": "2026-01-28",
+      "actual_rv_5d": 0.011538619025932622,
+      "prediction": 0.012920288369059563,
+      "error": 0.0013816693431269404,
+      "error_pct": "+12.0 percent"
+    },
+    {
+      "date": "2026-01-29",
+      "actual_rv_5d": 0.016945392367621177,
+      "prediction": 0.013401458971202374,
+      "error": -0.003543933396418803,
+      "error_pct": "-20.9 percent"
+    },
+    {
+      "date": "2026-01-30",
+      "actual_rv_5d": 0.025285201423551062,
+      "prediction": 0.01480790413916111,
+      "error": -0.010477297284389953,
+      "error_pct": "-41.4 percent"
+    },
+    {
+      "date": "2026-02-02",
+      "actual_rv_5d": 0.025256437993470972,
+      "prediction": 0.013460367918014526,
+      "error": -0.011796070075456445,
+      "error_pct": "-46.7 percent"
+    },
+    {
+      "date": "2026-02-03",
+      "actual_rv_5d": 0.02393236226756906,
+      "prediction": 0.015360455960035324,
+      "error": -0.008571906307533735,
+      "error_pct": "-35.8 percent"
+    },
+    {
+      "date": "2026-02-04",
+      "actual_rv_5d": 0.023435735456854456,
+      "prediction": 0.017709186300635338,
+      "error": -0.005726549156219118,
+      "error_pct": "-24.4 percent"
+    },
+    {
+      "date": "2026-02-05",
+      "actual_rv_5d": 0.025173182836486452,
+      "prediction": 0.02302413247525692,
+      "error": -0.002149050361229532,
+      "error_pct": "-8.5 percent"
+    },
+    {
+      "date": "2026-02-06",
+      "actual_rv_5d": 0.016524765495387606,
+      "prediction": 0.02043883129954338,
+      "error": 0.0039140658041557745,
+      "error_pct": "+23.7 percent"
+    },
+    {
+      "date": "2026-02-09",
+      "actual_rv_5d": 0.015891160653965553,
+      "prediction": 0.014305206015706062,
+      "error": -0.001585954638259491,
+      "error_pct": "-10.0 percent"
+    },
+    {
+      "date": "2026-02-10",
+      "actual_rv_5d": 0.016456232528370775,
+      "prediction": 0.015255525708198547,
+      "error": -0.001200706820172228,
+      "error_pct": "-7.3 percent"
+    },
+    {
+      "date": "2026-02-11",
+      "actual_rv_5d": 0.016665180455509715,
+      "prediction": 0.01432295236736536,
+      "error": -0.0023422280881443547,
+      "error_pct": "-14.1 percent"
+    },
+    {
+      "date": "2026-02-12",
+      "actual_rv_5d": 0.009340420479027431,
+      "prediction": 0.02140045538544655,
+      "error": 0.012060034906419118,
+      "error_pct": "+129.1 percent"
+    },
+    {
+      "date": "2026-02-13",
+      "actual_rv_5d": 0.01385975914031033,
+      "prediction": 0.021258944645524025,
+      "error": 0.007399185505213695,
+      "error_pct": "+53.4 percent"
+    },
+    {
+      "date": "2026-02-17",
+      "actual_rv_5d": 0.01555453924813837,
+      "prediction": 0.021627062931656837,
+      "error": 0.006072523683518467,
+      "error_pct": "+39.0 percent"
+    },
+    {
+      "date": "2026-02-18",
+      "actual_rv_5d": 0.016949945987682447,
+      "prediction": 0.018704893067479134,
+      "error": 0.0017549470797966864,
+      "error_pct": "+10.4 percent"
+    }
+  ],
+  "performance": {
+    "overall": {
+      "rmse": 0.0070269582252378265,
+      "mae": 0.006261004697084172,
+      "r2": -0.09877834655495121,
+      "mape": 47.56780656223862,
+      "hit_rate": 0.2
+    },
+    "recent_30d": {
+      "rmse": 0.0070269582252378265,
+      "mae": 0.006261004697084172,
+      "r2": -0.09877834655495121,
+      "mape": 47.56780656223862,
+      "hit_rate": 0.2
+    },
+    "rolling_30d": [
+      {
+        "end_date": "2026-02-18",
+        "window_size": 30,
+        "rmse": 0.0070269582252378265,
+        "mae": 0.006261004697084172,
+        "r2": -0.09877834655495121,
+        "mape": 47.56780656223862,
+        "hit_rate": 0.2
+      }
+    ],
+    "benchmark_comparison": {
+      "test_rmse": 0.006608345051174711,
+      "production_rmse": 0.0070269582252378265,
+      "trained_date": "2026-02-24",
+      "rmse_diff": 0.00041861317406311545,
+      "rmse_diff_pct": 6.334614352328682,
+      "status": "GOOD"
+    }
+  }
+}

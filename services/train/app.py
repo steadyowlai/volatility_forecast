@@ -263,3 +263,27 @@ def main():
 
 if __name__ == "__main__":
 	main()
+
+
+def lambda_handler(event, context):
+	"""AWS Lambda entry point."""
+	try:
+		main()
+		return {
+			'statusCode': 200,
+			'body': json.dumps({
+				'message': 'Training completed successfully',
+				'timestamp': datetime.utcnow().isoformat() + 'Z'
+			})
+		}
+	except Exception as e:
+		import traceback
+		print(f"\n❌ Error: {e}")
+		traceback.print_exc()
+		return {
+			'statusCode': 500,
+			'body': json.dumps({
+				'message': f'Training failed: {str(e)}',
+				'timestamp': datetime.utcnow().isoformat() + 'Z'
+			})
+		}

@@ -45,7 +45,7 @@ class Storage:
             bucket_name: S3 bucket name (only used in AWS environment)
         """
         self.is_aws = os.getenv('AWS_EXECUTION_ENV') is not None
-        self.bucket_name = bucket_name or os.getenv('S3_BUCKET', 'volatility-forecast-data')
+        self.bucket_name = bucket_name or os.getenv('S3_BUCKET', 'volatility-forecast')
         
         if self.is_aws:
             import boto3
@@ -153,10 +153,16 @@ class Storage:
             path: File path (e.g., 'data/data_status.json')
         """
         if self.is_aws:
+            # Short TTL so CloudFront serves fresh data within minutes of pipeline run
+            # (avoids need for manual invalidations)
+            is_monitor_output = '/monitor/' in path or path.endswith('summary.json') or path.endswith('alerts.json')
+            cache_control = 'max-age=300' if is_monitor_output else 'max-age=3600'
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=self._get_s3_key(path),
-                Body=json.dumps(data, indent=2).encode('utf-8')
+                Body=json.dumps(data, indent=2).encode('utf-8'),
+                CacheControl=cache_control,
+                ContentType='application/json',
             )
         else:
             local_path = self._get_local_path(path)

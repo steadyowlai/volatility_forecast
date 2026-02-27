@@ -161,3 +161,32 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def lambda_handler(event, context):
+    """AWS Lambda entry point."""
+    try:
+        main()
+        response = {
+            'statusCode': 200,
+            'body': '{"message": "Prediction completed successfully"}'
+        }
+        # Chain: trigger vf-monitor asynchronously
+        try:
+            import boto3
+            boto3.client('lambda', region_name='us-east-1').invoke(
+                FunctionName='vf-monitor',
+                InvocationType='Event'
+            )
+            print("Triggered vf-monitor")
+        except Exception as chain_err:
+            print(f"WARNING: Failed to trigger vf-monitor: {chain_err}")
+        return response
+    except Exception as e:
+        import traceback
+        print(f"\n❌ Error: {e}")
+        traceback.print_exc()
+        return {
+            'statusCode': 500,
+            'body': f'{{"message": "Prediction failed: {str(e)}"}}'
+        }

@@ -1,0 +1,72 @@
+{
+  "metadata": {
+    "generated_at": "2026-02-27T16:42:19.841597Z",
+    "total_predictions": 35,
+    "predictions_with_actuals": 30,
+    "predictions_without_actuals": 5,
+    "model_trained_date": "2026-02-24"
+  },
+  "current_forecast": {
+    "date": "2026-02-25",
+    "volatility": 0.01556645892560482,
+    "volatility_pct": "1.56 percent",
+    "regime": "NORMAL",
+    "regime_emoji": "NORMAL",
+    "trend": "STABLE",
+    "trend_change_pct": -5.531041882874644,
+    "percentile": 46.666666666666664,
+    "confidence": "MEDIUM",
+    "insights": []
+  },
+  "latest_predictions": [
+    {
+      "date": "2026-02-19",
+      "prediction": 0.020999304950237274,
+      "prediction_pct": "2.10 percent"
+    },
+    {
+      "date": "2026-02-20",
+      "prediction": 0.015693625435233116,
+      "prediction_pct": "1.57 percent"
+    },
+    {
+      "date": "2026-02-23",
+      "prediction": 0.021434195339679718,
+      "prediction_pct": "2.14 percent"
+    },
+    {
+      "date": "2026-02-24",
+      "prediction": 0.01823822222650051,
+      "prediction_pct": "1.82 percent"
+    },
+    {
+      "date": "2026-02-25",
+      "prediction": 0.01556645892560482,
+      "prediction_pct": "1.56 percent"
+    }
+  ],
+  "performance": {
+    "overall": {
+      "rmse": 0.0070269582252378265,
+      "mae": 0.006261004697084172,
+      "r2": -0.09877834655495121,
+      "mape": 47.56780656223862,
+      "hit_rate": 0.2
+    },
+    "recent_30d": {
+      "rmse": 0.0070269582252378265,
+      "mae": 0.006261004697084172,
+      "r2": -0.09877834655495121,
+      "mape": 47.56780656223862,
+      "hit_rate": 0.2
+    },
+    "benchmark_comparison": {
+      "test_rmse": 0.006608345051174711,
+      "production_rmse": 0.0070269582252378265,
+      "trained_date": "2026-02-24",
+      "rmse_diff": 0.00041861317406311545,
+      "rmse_diff_pct": 6.334614352328682,
+      "status": "GOOD"
+    }
+  }
+}

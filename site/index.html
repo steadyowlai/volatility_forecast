@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SPY Volatility Forecast</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#f0f9ff', 500: '#0ea5e9', 900: '#0c4a6e' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background: #0f172a; }
+    .glass {
+      background: rgba(255,255,255,0.04);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .pulse-dot { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .scrollbar-thin::-webkit-scrollbar { width: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.2); border-radius: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.4); }
+  </style>
+</head>
+<body class="min-h-screen text-slate-100 font-sans">
+
+  <!-- Header -->
+  <header class="border-b border-slate-700/50 px-6 py-4">
+    <div class="max-w-6xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-sky-500/20 flex items-center justify-center text-sky-400 text-lg">📈</div>
+        <div>
+          <h1 class="text-lg font-semibold text-white">SPY Volatility Forecast</h1>
+          <p class="text-xs text-slate-400">XGBoost · 5-Day Realized Volatility</p>
+        </div>
+      </div>
+      <div id="last-updated" class="text-xs text-slate-500">Loading…</div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8 space-y-6">
+
+    <!-- Loading / Error state -->
+    <div id="loading" class="text-center py-20 text-slate-400">
+      <div class="text-4xl mb-4">⏳</div>
+      <p>Loading forecast data…</p>
+    </div>
+    <div id="error" class="hidden text-center py-20 text-red-400">
+      <div class="text-4xl mb-4">⚠️</div>
+      <p id="error-msg">Failed to load data.</p>
+    </div>
+
+    <!-- Main content (hidden until loaded) -->
+    <div id="content" class="hidden space-y-6">
+
+      <!-- Row 1: Status + Current Forecast + Model Info -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+        <!-- Model Status -->
+        <div class="glass rounded-2xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-widest mb-3">Model Status</p>
+          <div id="status-badge" class="text-3xl font-bold mb-1">—</div>
+          <div class="text-sm text-slate-400 mt-2">
+            <div class="flex justify-between py-1 border-b border-slate-700/50">
+              <span>Benchmark RMSE</span>
+              <span id="test-rmse" class="text-slate-200 font-mono">—</span>
+            </div>
+            <div class="flex justify-between py-1 border-b border-slate-700/50">
+              <span>Production RMSE</span>
+              <span id="prod-rmse" class="text-slate-200 font-mono">—</span>
+            </div>
+            <div class="flex justify-between py-1">
+              <span>Drift</span>
+              <span id="rmse-diff" class="font-mono">—</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Current Forecast -->
+        <div class="glass rounded-2xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-widest mb-3">Current Forecast</p>
+          <div class="flex items-end gap-2 mb-1">
+            <span id="vol-pct" class="text-4xl font-bold text-sky-400">—</span>
+            <span class="text-slate-400 text-sm mb-1">RV (5d)</span>
+          </div>
+          <div class="text-sm text-slate-400 mt-3 space-y-1">
+            <div class="flex justify-between py-1 border-b border-slate-700/50">
+              <span>Regime</span>
+              <span id="regime" class="font-medium text-slate-200">—</span>
+            </div>
+            <div class="flex justify-between py-1 border-b border-slate-700/50">
+              <span>Trend</span>
+              <span id="trend" class="font-medium text-slate-200">—</span>
+            </div>
+            <div class="flex justify-between py-1">
+              <span>Percentile</span>
+              <span id="percentile" class="font-medium text-slate-200">—</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Model Info -->
+        <div class="glass rounded-2xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-widest mb-3">Model Info</p>
+          <div class="text-sm text-slate-400 space-y-1">
+            <div class="flex justify-between py-1 border-b border-slate-700/50">
+              <span>Trained</span>
+              <span id="trained-date" class="text-slate-200">—</span>
+            </div>
+            <div class="flex justify-between py-1 border-b border-slate-700/50">
+              <span>Total Predictions</span>
+              <span id="total-preds" class="text-slate-200">—</span>
+            </div>
+            <div class="flex justify-between py-1 border-b border-slate-700/50">
+              <span>Hit Rate (20% tol.)</span>
+              <span id="hit-rate" class="text-slate-200">—</span>
+            </div>
+            <div class="flex justify-between py-1">
+              <span>MAPE</span>
+              <span id="mape" class="text-slate-200">—</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Alerts -->
+      <div id="alerts-section" class="hidden glass rounded-2xl p-5">
+        <p class="text-xs text-slate-400 uppercase tracking-widest mb-3">⚡ Alerts</p>
+        <div id="alerts-list" class="space-y-2"></div>
+      </div>
+
+      <!-- Row 2: Chart -->
+      <div class="glass rounded-2xl p-5">
+        <p class="text-xs text-slate-400 uppercase tracking-widest mb-4">Predicted vs Actual Realized Volatility</p>
+        <div class="relative h-64">
+          <canvas id="rv-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Row 3: Upcoming Predictions + Predictions vs Actuals -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <!-- Upcoming -->
+        <div class="glass rounded-2xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-widest mb-3">Upcoming Predictions</p>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-slate-500 text-xs border-b border-slate-700/50">
+                <th class="text-left pb-2">Date</th>
+                <th class="text-right pb-2">Predicted RV</th>
+                <th class="text-right pb-2">Regime</th>
+              </tr>
+            </thead>
+            <tbody id="upcoming-table" class="divide-y divide-slate-700/30"></tbody>
+          </table>
+        </div>
+
+        <!-- Recent actuals -->
+        <div class="glass rounded-2xl p-5 flex flex-col">
+          <p class="text-xs text-slate-400 uppercase tracking-widest mb-3">Predictions vs Actuals</p>
+          <div class="overflow-y-auto max-h-72 scrollbar-thin">
+            <table class="w-full text-sm">
+              <thead class="sticky top-0 bg-slate-900/90 backdrop-blur-sm">
+                <tr class="text-slate-500 text-xs border-b border-slate-700/50">
+                  <th class="text-left pb-2 pt-1">Date</th>
+                  <th class="text-right pb-2 pt-1">Actual</th>
+                  <th class="text-right pb-2 pt-1">Predicted</th>
+                  <th class="text-right pb-2 pt-1">Error</th>
+                </tr>
+              </thead>
+              <tbody id="actuals-table" class="divide-y divide-slate-700/30"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <footer class="text-center text-xs text-slate-600 py-6">
+    Data updates daily at 6:00 PM EST on trading days · S3 + CloudFront · XGBoost model
+  </footer>
+
+  <script>
+    // Use relative paths when served locally, CloudFront paths in production
+    const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    const BASE = IS_LOCAL ? '.' : 'https://d8e2il2h41a0d.cloudfront.net';
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function fmt(v, decimals = 4) { return (v * 100).toFixed(decimals) + '%'; }
+    function fmtDate(d) {
+      return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function regimeColor(r) {
+      return { LOW: 'text-emerald-400', NORMAL: 'text-sky-400', ELEVATED: 'text-amber-400', HIGH: 'text-red-400' }[r] || 'text-slate-300';
+    }
+    function regimeIcon(r) {
+      return { LOW: '🟢', NORMAL: '🔵', ELEVATED: '🟡', HIGH: '🔴' }[r] || '⚪';
+    }
+    function trendIcon(t) {
+      return { INCREASING: '↑', DECREASING: '↓', STABLE: '→' }[t] || '—';
+    }
+    function statusColor(s) {
+      return { GOOD: 'text-emerald-400', ACCEPTABLE: 'text-amber-400', DEGRADED: 'text-red-400' }[s] || 'text-slate-300';
+    }
+    function alertSeverityClass(s) {
+      return { ALERT: 'bg-red-500/10 border border-red-500/30 text-red-300', WARNING: 'bg-amber-500/10 border border-amber-500/30 text-amber-300', INFO: 'bg-sky-500/10 border border-sky-500/30 text-sky-300' }[s] || '';
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────────
+    function render(summary, monitor) {
+      const { metadata, current_forecast: cf, latest_predictions, performance } = summary;
+      const { benchmark_comparison: bm, overall } = performance;
+      const pva = monitor.predictions_vs_actuals || [];
+
+      // Header timestamp
+      const dt = new Date(metadata.generated_at);
+      document.getElementById('last-updated').textContent =
+        'Updated ' + dt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
+      // Status badge
+      const sb = document.getElementById('status-badge');
+      sb.textContent = bm.status;
+      sb.className = `text-3xl font-bold mb-1 ${statusColor(bm.status)}`;
+
+      document.getElementById('test-rmse').textContent = (bm.test_rmse * 1000).toFixed(4) + ' ‰';
+      document.getElementById('prod-rmse').textContent = (bm.production_rmse * 1000).toFixed(4) + ' ‰';
+      const diffEl = document.getElementById('rmse-diff');
+      diffEl.textContent = (bm.rmse_diff_pct > 0 ? '+' : '') + bm.rmse_diff_pct.toFixed(2) + '%';
+      diffEl.className = `font-mono ${bm.rmse_diff_pct > 10 ? 'text-red-400' : bm.rmse_diff_pct > 0 ? 'text-amber-400' : 'text-emerald-400'}`;
+
+      // Current forecast
+      document.getElementById('vol-pct').textContent = fmt(cf.volatility, 2);
+      const regEl = document.getElementById('regime');
+      regEl.textContent = regimeIcon(cf.regime) + ' ' + cf.regime;
+      regEl.className = `font-medium ${regimeColor(cf.regime)}`;
+      document.getElementById('trend').textContent = trendIcon(cf.trend) + ' ' + cf.trend + (cf.trend_change_pct ? ` (${cf.trend_change_pct > 0 ? '+' : ''}${cf.trend_change_pct.toFixed(1)}%)` : '');
+      document.getElementById('percentile').textContent = cf.percentile !== null ? cf.percentile.toFixed(1) + 'th' : '—';
+
+      // Model info
+      document.getElementById('trained-date').textContent = fmtDate(metadata.model_trained_date);
+      document.getElementById('total-preds').textContent = metadata.total_predictions;
+      document.getElementById('hit-rate').textContent = overall ? (overall.hit_rate * 100).toFixed(1) + '%' : '—';
+      document.getElementById('mape').textContent = overall ? overall.mape.toFixed(1) + '%' : '—';
+
+      // Alerts
+      if (cf.insights && cf.insights.length > 0) {
+        document.getElementById('alerts-section').classList.remove('hidden');
+        document.getElementById('alerts-list').innerHTML = cf.insights.map(i =>
+          `<div class="rounded-lg px-3 py-2 text-sm ${alertSeverityClass(i.severity)}">
+            <span class="font-semibold">[${i.type}]</span> ${i.message}
+          </div>`
+        ).join('');
+      }
+
+      // Upcoming predictions table
+      document.getElementById('upcoming-table').innerHTML = latest_predictions.map(p =>
+        `<tr>
+          <td class="py-2 text-slate-300">${fmtDate(p.date)}</td>
+          <td class="py-2 text-right font-mono text-sky-400">${fmt(p.prediction, 2)}</td>
+          <td class="py-2 text-right ${regimeColor(getRegime(p.prediction))}">${regimeIcon(getRegime(p.prediction))} ${getRegime(p.prediction)}</td>
+        </tr>`
+      ).join('');
+
+      // Predictions vs actuals table (all rows, newest first)
+      const recent = [...pva].reverse();
+      document.getElementById('actuals-table').innerHTML = recent.map(r =>
+        `<tr>
+          <td class="py-2 text-slate-300">${fmtDate(r.date)}</td>
+          <td class="py-2 text-right font-mono text-slate-200">${fmt(r.actual_rv_5d, 2)}</td>
+          <td class="py-2 text-right font-mono text-sky-400">${fmt(r.prediction, 2)}</td>
+          <td class="py-2 text-right font-mono ${r.error > 0 ? 'text-amber-400' : 'text-emerald-400'}">${r.error_pct}</td>
+        </tr>`
+      ).join('');
+
+      // Chart
+      buildChart(pva);
+
+      // Show content
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('content').classList.remove('hidden');
+    }
+
+    function getRegime(v) {
+      if (v < 0.015) return 'LOW';
+      if (v < 0.03) return 'NORMAL';
+      if (v < 0.05) return 'ELEVATED';
+      return 'HIGH';
+    }
+
+    function buildChart(pva) {
+      const labels = pva.map(r => r.date);
+      const actuals = pva.map(r => +(r.actual_rv_5d * 100).toFixed(4));
+      const preds   = pva.map(r => +(r.prediction * 100).toFixed(4));
+
+      new Chart(document.getElementById('rv-chart'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Actual RV',
+              data: actuals,
+              borderColor: '#38bdf8',
+              backgroundColor: 'rgba(56,189,248,0.08)',
+              borderWidth: 2,
+              pointRadius: 3,
+              tension: 0.3,
+              fill: true,
+            },
+            {
+              label: 'Predicted RV',
+              data: preds,
+              borderColor: '#f59e0b',
+              backgroundColor: 'transparent',
+              borderWidth: 2,
+              borderDash: [5, 3],
+              pointRadius: 3,
+              tension: 0.3,
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { labels: { color: '#94a3b8', boxWidth: 14, font: { size: 11 } } },
+            tooltip: {
+              backgroundColor: '#1e293b',
+              borderColor: '#334155',
+              borderWidth: 1,
+              titleColor: '#e2e8f0',
+              bodyColor: '#94a3b8',
+              callbacks: {
+                label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(4)}%`
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { color: '#475569', maxTicksLimit: 10, font: { size: 10 } },
+              grid: { color: 'rgba(255,255,255,0.04)' }
+            },
+            y: {
+              ticks: {
+                color: '#475569',
+                font: { size: 10 },
+                callback: v => v.toFixed(2) + '%'
+              },
+              grid: { color: 'rgba(255,255,255,0.04)' }
+            }
+          }
+        }
+      });
+    }
+
+    // ── Fetch ─────────────────────────────────────────────────────────────────
+    async function load() {
+      try {
+        const [summaryRes, monitorRes] = await Promise.all([
+          fetch(IS_LOCAL ? `${BASE}/summary.json` : `${BASE}/data/monitor/latest/summary.json`),
+          fetch(IS_LOCAL ? `${BASE}/monitor.json` : `${BASE}/data/monitor/latest/monitor.json`)
+        ]);
+        if (!summaryRes.ok || !monitorRes.ok) throw new Error(`HTTP ${summaryRes.status}`);
+        const [summary, monitor] = await Promise.all([summaryRes.json(), monitorRes.json()]);
+        render(summary, monitor);
+      } catch (e) {
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('error').classList.remove('hidden');
+        document.getElementById('error-msg').textContent = 'Failed to load data: ' + e.message;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

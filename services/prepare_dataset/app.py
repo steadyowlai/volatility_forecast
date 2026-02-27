@@ -340,15 +340,15 @@ def prepare_dataset():
     if is_full_rebuild:
         master_new = features_df.copy()
     else:
-        # Exclude the first 5 context rows (they're already in master)
+        # Split: context rows (with freshly computed rv_5d) and truly new rows
         context_count = len(context_rows)
-        master_new = features_df.iloc[context_count:].copy()
-        print(f"\nStep 5: Excluding {context_count} context rows from new data")
-        print(f"  New rows to add: {len(master_new)}")
-    
+        context_updated = features_df.iloc[:context_count].copy()   # context with backfilled rv_5d
+        master_new = features_df.iloc[context_count:].copy()        # brand new rows
+        print(f"\nStep 5: {context_count} context rows backfilled, {len(master_new)} new rows to append")
+
     # Step 6: Append to master or create new
     print("\nStep 6: Updating master dataset...")
-    
+
     if is_full_rebuild or not storage.exists(MASTER_PATH):
         print("  Creating new master_dataset from scratch")
         master_full = master_new.copy()
@@ -357,7 +357,17 @@ def prepare_dataset():
         existing_master = storage.read_parquet(MASTER_PATH)
         existing_master['date'] = pd.to_datetime(existing_master['date'])
         print(f"  Existing: {len(existing_master)} rows")
-        
+
+        # Backfill rv_5d for the context rows already in master
+        existing_master = existing_master.set_index('date')
+        for _, row in context_updated.iterrows():
+            d = row['date']
+            if d in existing_master.index and pd.notna(row['rv_5d']):
+                existing_master.at[d, 'rv_5d'] = row['rv_5d']
+        existing_master = existing_master.reset_index()
+        backfilled = context_updated['rv_5d'].notna().sum()
+        print(f"  Backfilled rv_5d for {backfilled} context rows")
+
         print(f"  Appending {len(master_new)} new rows...")
         master_full = pd.concat([existing_master, master_new], ignore_index=True)
         master_full = master_full.sort_values('date').reset_index(drop=True)
@@ -429,6 +439,41 @@ def main():
         import traceback
         traceback.print_exc()
         exit(1)
+
+
+def lambda_handler(event, context):
+    """AWS Lambda entry point."""
+    try:
+        prepare_dataset()
+        response = {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': 'Dataset preparation completed successfully',
+                'timestamp': datetime.utcnow().isoformat() + 'Z'
+            })
+        }
+        # Chain: trigger vf-predict asynchronously
+        try:
+            import boto3
+            boto3.client('lambda', region_name='us-east-1').invoke(
+                FunctionName='vf-predict',
+                InvocationType='Event'
+            )
+            print("Triggered vf-predict")
+        except Exception as chain_err:
+            print(f"WARNING: Failed to trigger vf-predict: {chain_err}")
+        return response
+    except Exception as e:
+        import traceback
+        print(f"\n❌ Error: {e}")
+        traceback.print_exc()
+        return {
+            'statusCode': 500,
+            'body': json.dumps({
+                'message': f'Dataset preparation failed: {str(e)}',
+                'timestamp': datetime.utcnow().isoformat() + 'Z'
+            })
+        }
 
 
 if __name__ == "__main__":

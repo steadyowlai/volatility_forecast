@@ -181,11 +181,11 @@ def main():
 		print(f"  Trend: {trend}")
 		print(f"  Insights: {len(insights)}")
 	
-	output = {"metadata": {"generated_at": datetime.utcnow().isoformat() + "Z", "total_predictions": len(predictions_df), "predictions_with_actuals": len(with_actuals), "predictions_without_actuals": len(without_actuals), "model_trained_date": benchmark.get('trained_date', 'unknown')}, "current_forecast": current_forecast, "latest_predictions": [{"date": row['date'].strftime('%Y-%m-%d'), "prediction": float(row['prediction']), "prediction_pct": f"{row['prediction']*100:.2f} percent"} for _, row in without_actuals.tail(5).iterrows()] if len(without_actuals) > 0 else [], "predictions_vs_actuals": [{"date": row['date'].strftime('%Y-%m-%d'), "actual_rv_5d": float(row['rv_5d']), "prediction": float(row['prediction']), "error": float(row['prediction'] - row['rv_5d']), "error_pct": f"{((row['prediction'] - row['rv_5d']) / row['rv_5d'] * 100):+.1f} percent"} for _, row in with_actuals.tail(30).iterrows()] if len(with_actuals) > 0 else [], "performance": {"overall": overall_metrics, "recent_30d": recent_30d_metrics, "rolling_30d": rolling_metrics, "benchmark_comparison": benchmark_comparison}}
+	output = {"metadata": {"generated_at": datetime.utcnow().isoformat() + "Z", "total_predictions": len(predictions_df), "predictions_with_actuals": len(with_actuals), "predictions_without_actuals": len(without_actuals), "model_trained_date": benchmark.get('trained_date', 'unknown')}, "current_forecast": current_forecast, "latest_predictions": [{"date": row['date'].strftime('%Y-%m-%d'), "prediction": float(row['prediction']), "prediction_pct": f"{row['prediction']*100:.2f} percent"} for _, row in without_actuals.iterrows()] if len(without_actuals) > 0 else [], "predictions_vs_actuals": [{"date": row['date'].strftime('%Y-%m-%d'), "actual_rv_5d": float(row['rv_5d']), "prediction": float(row['prediction']), "error": float(row['prediction'] - row['rv_5d']), "error_pct": f"{((row['prediction'] - row['rv_5d']) / row['rv_5d'] * 100):+.1f} percent"} for _, row in with_actuals.tail(30).iterrows()] if len(with_actuals) > 0 else [], "performance": {"overall": overall_metrics, "recent_30d": recent_30d_metrics, "rolling_30d": rolling_metrics, "benchmark_comparison": benchmark_comparison}}
 	monitor_file = f"{MONITOR_OUTPUT}/monitor.json"
 	storage.write_json(output, monitor_file)
 	print(f"\nSaved: {monitor_file}")
-	summary = {"metadata": output["metadata"], "current_forecast": output["current_forecast"], "latest_predictions": output["latest_predictions"][:5], "performance": {"overall": overall_metrics, "recent_30d": recent_30d_metrics, "benchmark_comparison": benchmark_comparison}}
+	summary = {"metadata": output["metadata"], "current_forecast": output["current_forecast"], "latest_predictions": output["latest_predictions"], "performance": {"overall": overall_metrics, "recent_30d": recent_30d_metrics, "benchmark_comparison": benchmark_comparison}}
 	summary_file = f"{MONITOR_OUTPUT}/summary.json"
 	storage.write_json(summary, summary_file)
 	print(f"Saved: {summary_file}")
@@ -200,3 +200,21 @@ def main():
 
 if __name__ == "__main__":
 	main()
+
+
+def lambda_handler(event, context):
+	"""AWS Lambda entry point."""
+	try:
+		main()
+		return {
+			'statusCode': 200,
+			'body': '{"message": "Monitor completed successfully"}'
+		}
+	except Exception as e:
+		import traceback
+		print(f"\n❌ Error: {e}")
+		traceback.print_exc()
+		return {
+			'statusCode': 500,
+			'body': f'{{"message": "Monitor failed: {str(e)}"}}'
+		}
